@@ -202,3 +202,29 @@ func TestFetch_GitHubTokenOnlySentToGitHub(t *testing.T) {
 		}
 	}
 }
+
+func TestLatestProjgen(t *testing.T) {
+	for _, tt := range []struct {
+		status     int
+		body, want string
+		wantErr    bool
+	}{
+		{http.StatusOK, `{"tag_name":"v0.3.1"}`, "v0.3.1", false},
+		{http.StatusOK, `{"tag_name":"nightly"}`, "", true},
+		{http.StatusNotFound, `{}`, "", true}, // no release yet
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/repos/"+ProjgenRepo+"/releases/latest" {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(tt.status)
+			w.Write([]byte(tt.body))
+		}))
+		got, err := (&Fetcher{Client: srv.Client(), GitHub: srv.URL}).LatestProjgen(context.Background())
+		srv.Close()
+		if got != tt.want || (err != nil) != tt.wantErr {
+			t.Errorf("%s: got %q, %v", tt.body, got, err)
+		}
+	}
+}

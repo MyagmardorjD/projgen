@@ -440,3 +440,22 @@ func (f *Fetcher) mavenRelease(ctx context.Context, path string) (string, error)
 	}
 	return fmt.Sprintf("%d.%d.%d", best[0], best[1], best[2]), nil
 }
+
+// ProjgenRepo is the GitHub repository projgen is released from.
+const ProjgenRepo = "MyagmardorjD/projgen"
+
+var releaseTagRe = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
+// LatestProjgen returns the tag of projgen's latest GitHub release ("v0.2.0").
+func (f *Fetcher) LatestProjgen(ctx context.Context) (string, error) {
+	var rel struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := f.getJSON(ctx, f.GitHub+"/repos/"+ProjgenRepo+"/releases/latest", &rel); err != nil {
+		return "", err
+	}
+	if !releaseTagRe.MatchString(rel.TagName) {
+		return "", fmt.Errorf("unexpected tag %q", rel.TagName)
+	}
+	return rel.TagName, nil
+}

@@ -186,3 +186,34 @@ func TestPresetSaveAndList(t *testing.T) {
 		t.Errorf("unknown preset err = %v, want the available names", err)
 	}
 }
+
+func TestVersion(t *testing.T) {
+	fakeHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tag_name":"v0.5.0"}`))
+	}))
+	t.Cleanup(srv.Close)
+	newFetcher = func() *versions.Fetcher { return &versions.Fetcher{Client: srv.Client(), GitHub: srv.URL} }
+	oldVersion := version
+	t.Cleanup(func() { version = oldVersion })
+
+	for _, tt := range []struct {
+		version string
+		args    []string
+		want    string
+		notWant string
+	}{
+		{"0.4.2", nil, "projgen v0.5.0 is available", ""},
+		{"0.5.0", nil, "latest release", "is available"},
+		{"0.4.2", []string{"--offline"}, "projgen 0.4.2", "is available"},
+	} {
+		version = tt.version
+		var out bytes.Buffer
+		if err := run(append([]string{"version"}, tt.args...), strings.NewReader(""), &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), tt.want) || (tt.notWant != "" && strings.Contains(out.String(), tt.notWant)) {
+			t.Errorf("version %s %v: output %q", tt.version, tt.args, out.String())
+		}
+	}
+}

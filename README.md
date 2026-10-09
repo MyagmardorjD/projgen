@@ -14,9 +14,26 @@
 
 ## Суулгах
 
+Go суулгасан бол:
+
 ```bash
 go install github.com/MyagmardorjD/projgen@latest
 ```
+
+Go-гүй бол (жишээ нь Java баг) [Releases](https://github.com/MyagmardorjD/projgen/releases/latest) хуудаснаас өөрийн платформын архивыг (Windows: `projgen_<хувилбар>_windows_amd64.zip`, Linux/macOS: `.tar.gz`, amd64/arm64) татаж задлаад `projgen`-ийг PATH-д хийнэ. `checksums.txt`-ээр шалгаж болно.
+
+`projgen version` нь хувилбараа хэвлэж, шинэ release гарсан бол мэдэгдэнэ (`--offline` бол шалгахгүй). `projgen update` ч мөн шалгана.
+
+### Release гаргах
+
+`v` угтвартай tag push хийхэд `.github/workflows/release.yml` GoReleaser-ээр Windows, Linux, macOS (amd64, arm64)-ийн binary, checksum, changelog-той GitHub release үүсгэнэ:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Нийтлэхгүйгээр локалаар шалгах: `goreleaser release --snapshot --clean` (үр дүн `dist/`-д).
 
 ## Вэб интерфейс
 
