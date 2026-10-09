@@ -106,6 +106,11 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 	if dir == "" {
 		dir = o.Name
 	}
+	// Show the full path so the developer knows exactly where the project is.
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
 	res, err := generator.Generate(o, dir, generator.Flags{DryRun: *dryRun, Force: *force})
 	if err != nil {
 		return err
@@ -134,7 +139,8 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 		}
 	}
 
-	fmt.Fprintf(out, "\nNext steps:\n  cd %s\n  go test ./...\n  go run ./cmd/server\n", dir)
+	fmt.Fprintf(out, "\nProject location: %s\n", dir)
+	fmt.Fprintf(out, "\nNext steps:\n  cd \"%s\"\n  go test ./...\n  go run ./cmd/server\n", dir)
 	return nil
 }
 
