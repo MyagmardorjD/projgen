@@ -1,0 +1,35 @@
+package {{.P.http.Name}};
+
+import {{.P.domain.Name}}.NameTooLongException;
+import java.util.Map;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/** Maps exceptions to JSON errors. Unexpected errors are logged once, here at the boundary. */
+@RestControllerAdvice
+public class ApiExceptionHandler {
+
+    private static final Logger LOG = LogManager.getLogger(ApiExceptionHandler.class);
+
+    @ExceptionHandler(NameTooLongException.class)
+    public ResponseEntity<Map<String, String>> badRequest(NameTooLongException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, String>> unexpected(Exception e) {
+        // Spring's own errors (404 for an unknown route, 405, 400 for a bad
+        // parameter) carry their status; they are client errors, not failures.
+        if (e instanceof ErrorResponse err) {
+            String detail = err.getBody().getDetail();
+            return ResponseEntity.status(err.getStatusCode()).body(Map.of("error", detail == null ? "" : detail));
+        }
+        LOG.error("request failed", e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "internal error"));
+    }
+}

@@ -1,0 +1,14 @@
+FROM eclipse-temurin:{{index .V.Java "lts"}}-jdk AS build
+WORKDIR /src
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+RUN chmod +x mvnw && ./mvnw -B -q dependency:go-offline
+COPY src src
+RUN ./mvnw -B -q package -DskipTests && cp target/{{.Opt.Name}}-*.jar /app.jar
+
+FROM eclipse-temurin:{{index .V.Java "lts"}}-jre
+RUN groupadd --system app && useradd --system --gid app app
+COPY --from=build /app.jar /app/app.jar
+USER app
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

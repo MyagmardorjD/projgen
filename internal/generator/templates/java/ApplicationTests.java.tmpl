@@ -1,0 +1,21 @@
+package {{.BasePkg}};
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+/** Starts the whole application context to check the wiring. */
+{{- if eq .Opt.Database "postgresql"}}
+// The pool connects lazily, so an unreachable database URL is enough here.
+@SpringBootTest(properties = "spring.datasource.url=jdbc:postgresql://127.0.0.1:1/none")
+{{- else if eq .Opt.Database "mysql"}}
+// The pool connects lazily, so an unreachable database URL is enough here.
+@SpringBootTest(properties = "spring.datasource.url=jdbc:mysql://127.0.0.1:1/none")
+{{- else}}
+@SpringBootTest
+{{- end}}
+class {{.App}}Tests {
+
+    @Test
+    void contextLoads() {
+    }
+}

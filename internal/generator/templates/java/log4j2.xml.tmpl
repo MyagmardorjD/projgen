@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Team logging standard: structured JSON with @timestamp, level, constant
+     message, service, env, request_id, logger. Dynamic values go in separate
+     snake_case fields through ThreadContext (see RequestIdFilter). -->
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <JsonTemplateLayout eventTemplateUri="classpath:log-event-template.json">
+                <EventTemplateAdditionalField key="service" value="${env:SERVICE_NAME:-{{.Opt.Name}}}"/>
+                <EventTemplateAdditionalField key="env" value="${env:APP_ENV:-dev}"/>
+            </JsonTemplateLayout>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <!-- DEBUG is for development only; use INFO in production. -->
+        <Root level="${env:LOG_LEVEL:-INFO}">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

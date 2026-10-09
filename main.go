@@ -158,7 +158,7 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 		return err
 	}
 	v := currentVersions(out, *offline)
-	if !*dryRun && !*skipTidy {
+	if !*dryRun && !*skipTidy && o.Language == "go" {
 		fmt.Fprintln(out, "Writing files, then running go mod tidy (downloads dependencies)...")
 	}
 	steps := create.Steps{Tidy: !*skipTidy, Git: !*noGit}
@@ -180,6 +180,11 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 	}
 
 	fmt.Fprintf(out, "\nProject location: %s\n", dir)
+	if o.Language == "java" {
+		fmt.Fprintf(out, "\nNext steps (JDK %s):\n  cd \"%s\"\n  ./mvnw verify            (Windows: mvnw.cmd verify)\n  ./mvnw spring-boot:run\n",
+			v.Java[versions.JavaLTS], dir)
+		return nil
+	}
 	fmt.Fprintf(out, "\nNext steps:\n  cd \"%s\"\n  go test ./...\n  go run ./cmd/server\n", dir)
 	return nil
 }
@@ -360,6 +365,10 @@ func printVersions(out io.Writer, old, cur versions.Versions) {
 	row("mysql LTS (docker image)", "Docker Hub", old.Images["mysql"], cur.Images["mysql"])
 	for _, a := range versions.Actions {
 		row(a, "GitHub", old.Actions[a], cur.Actions[a])
+	}
+	row("Java LTS", "api.adoptium.net", old.Java[versions.JavaLTS], cur.Java[versions.JavaLTS])
+	for _, k := range versions.JavaKeys[1:] {
+		row(k, "Maven Central", old.Java[k], cur.Java[k])
 	}
 }
 

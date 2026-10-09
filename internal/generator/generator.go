@@ -22,7 +22,10 @@ import (
 	"github.com/MyagmardorjD/projgen/internal/versions"
 )
 
-//go:embed all:templates
+// templates/ holds text/template files; static/ holds files copied as-is
+// (the official Maven Wrapper scripts).
+//
+//go:embed all:templates all:static
 var templateFS embed.FS
 
 // ErrDirNotEmpty is returned when the target exists, is not empty and Force is off.
@@ -40,11 +43,12 @@ type Result struct {
 	Files []string
 }
 
-// Pkg is one Go package in the generated project.
+// Pkg is one package in the generated project.
 type Pkg struct {
-	Dir    string // slash-separated, relative to the project root
-	Name   string // package name
-	Import string // full import path
+	Dir     string // slash-separated, relative to the project root
+	Name    string // Go: package name. Java: full package name
+	Import  string // Go: import path. Java: full package name
+	TestDir string // Java only: where the package's tests live
 }
 
 // DB holds database-specific values used by templates.
@@ -56,6 +60,11 @@ type DB struct {
 	Port       string
 	LocalURL   string // DSN for running the app on the host
 	ComposeURL string // DSN inside docker-compose
+
+	JavaGroup      string // JDBC driver Maven groupId
+	JavaArtifact   string // JDBC driver Maven artifactId
+	JavaLocalURL   string // JDBC URL for running the app on the host
+	JavaComposeURL string // JDBC URL inside docker-compose
 }
 
 // Require is one line of the generated go.mod require block.
@@ -72,6 +81,11 @@ type Data struct {
 	DB       DB
 	V        versions.Versions
 	Requires []Require
+
+	Java    bool   // language is java
+	BasePkg string // Java base package (module)
+	BaseDir string // Java: src/main/java/<base package path>
+	App     string // Java main class, e.g. OrderServiceApplication
 }
 
 // frameworkModules maps a framework to the Go module it needs.
@@ -82,8 +96,9 @@ var frameworkModules = map[string]string{
 }
 
 type file struct {
-	out  string // output path, slash-separated
-	tmpl string // template path under templates/
+	out    string // output path, slash-separated
+	tmpl   string // template path under templates/, or under static/ when static
+	static bool   // copy as-is, no template processing
 }
 
 // layouts maps architecture -> component -> {dir, package name}.
@@ -114,6 +129,13 @@ var layouts = map[string]map[string][2]string{
 	},
 }
 
+// javaLayouts maps architecture -> component -> package suffix under the base package.
+var javaLayouts = map[string]map[string]string{
+	"layered":   {"config": "config", "domain": "model", "service": "service", "http": "controller", "db": "repository"},
+	"clean":     {"config": "config", "domain": "domain", "service": "usecase", "http": "delivery.web", "db": "repository"},
+	"hexagonal": {"config": "config", "domain": "core.domain", "service": "core.service", "http": "adapters.web", "db": "adapters.persistence"},
+}
+
 var databases = map[string]DB{
 	"postgresql": {
 		Driver:     "pgx",
@@ -123,6 +145,11 @@ var databases = map[string]DB{
 		Port:       "5432",
 		LocalURL:   "postgres://app:app@localhost:5432/app?sslmode=disable",
 		ComposeURL: "postgres://${DB_USER:-app}:${DB_PASSWORD:-app}@db:5432/${DB_NAME:-app}?sslmode=disable",
+
+		JavaGroup:      "org.postgresql",
+		JavaArtifact:   "postgresql",
+		JavaLocalURL:   "jdbc:postgresql://localhost:5432/app",
+		JavaComposeURL: "jdbc:postgresql://db:5432/${DB_NAME:-app}",
 	},
 	"mysql": {
 		Driver:     "mysql",
@@ -132,11 +159,19 @@ var databases = map[string]DB{
 		Port:       "3306",
 		LocalURL:   "app:app@tcp(localhost:3306)/app?parseTime=true",
 		ComposeURL: "${DB_USER:-app}:${DB_PASSWORD:-app}@tcp(db:3306)/${DB_NAME:-app}?parseTime=true",
+
+		JavaGroup:      "com.mysql",
+		JavaArtifact:   "mysql-connector-j",
+		JavaLocalURL:   "jdbc:mysql://localhost:3306/app",
+		JavaComposeURL: "jdbc:mysql://db:3306/${DB_NAME:-app}",
 	},
 }
 
 // NewData builds template data for valid options and the given versions.
 func NewData(o options.Options, v versions.Versions) Data {
+	if o.Language == "java" {
+		return newJavaData(o, v)
+	}
 	dbShort := map[string]string{"postgresql": "postgres", "mysql": "mysql", "none": "memory"}[o.Database]
 	p := map[string]Pkg{}
 	for comp, v := range layouts[o.Architecture] {
@@ -155,34 +190,112 @@ func NewData(o options.Options, v versions.Versions) Data {
 	return d
 }
 
-func plan(d Data) []file {
-	o, p := d.Opt, d.P
-	files := []file{
-		{"go.mod", "go.mod.tmpl"},
-		{"cmd/server/main.go", "main.go.tmpl"},
-		{p["config"].Dir + "/config.go", "config.go.tmpl"},
-		{p["config"].Dir + "/config_test.go", "config_test.go.tmpl"},
-		{p["logger"].Dir + "/logger.go", "logger.go.tmpl"},
-		{p["logger"].Dir + "/logger_test.go", "logger_test.go.tmpl"},
-		{p["domain"].Dir + "/greeting.go", "greeting.go.tmpl"},
-		{p["service"].Dir + "/greeter.go", "greeter.go.tmpl"},
-		{p["service"].Dir + "/greeter_test.go", "greeter_test.go.tmpl"},
-		{p["http"].Dir + "/router.go", "http/" + o.Framework + ".go.tmpl"},
-		{p["http"].Dir + "/router_test.go", "http/router_test.go.tmpl"},
-		{".gitignore", "gitignore.tmpl"},
-		{".env.example", "env.example.tmpl"},
-		{"Makefile", "Makefile.tmpl"},
-		{"README.md", "README.md.tmpl"},
+func newJavaData(o options.Options, v versions.Versions) Data {
+	baseDir := "src/main/java/" + strings.ReplaceAll(o.Module, ".", "/")
+	testDir := "src/test/java/" + strings.ReplaceAll(o.Module, ".", "/")
+	p := map[string]Pkg{}
+	for comp, suffix := range javaLayouts[o.Architecture] {
+		sub := strings.ReplaceAll(suffix, ".", "/")
+		pkg := o.Module + "." + suffix
+		p[comp] = Pkg{Dir: baseDir + "/" + sub, Name: pkg, Import: pkg, TestDir: testDir + "/" + sub}
+	}
+	d := Data{
+		Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], V: v,
+		Java: true, BasePkg: o.Module, BaseDir: baseDir, App: className(o.Name) + "Application",
 	}
 	if d.HasDB {
-		files = append(files, file{p["db"].Dir + "/db.go", "db.go.tmpl"})
+		d.DB.Image += ":" + v.Images[d.DB.Image]
+	}
+	return d
+}
+
+// className turns "order-service" into "OrderService".
+func className(name string) string {
+	var b strings.Builder
+	for _, part := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' }) {
+		b.WriteString(strings.ToUpper(part[:1]) + part[1:])
+	}
+	s := b.String()
+	if s == "" || s[0] >= '0' && s[0] <= '9' {
+		s = "App" + s
+	}
+	return s
+}
+
+func javaPlan(d Data) []file {
+	o, p := d.Opt, d.P
+	testBase := strings.Replace(d.BaseDir, "src/main/", "src/test/", 1)
+	files := []file{
+		{"pom.xml", "java/pom.xml.tmpl", false},
+		{"mvnw", "java/mvnw", true},
+		{"mvnw.cmd", "java/mvnw.cmd", true},
+		{".mvn/wrapper/maven-wrapper.properties", "java/maven-wrapper.properties.tmpl", false},
+		{".gitattributes", "java/gitattributes.tmpl", false},
+		{".gitignore", "java/gitignore.tmpl", false},
+		{".env.example", "env.example.tmpl", false},
+		{"README.md", "java/README.md.tmpl", false},
+		{d.BaseDir + "/" + d.App + ".java", "java/Application.java.tmpl", false},
+		{p["domain"].Dir + "/Greeting.java", "java/Greeting.java.tmpl", false},
+		{p["domain"].Dir + "/NameTooLongException.java", "java/NameTooLongException.java.tmpl", false},
+		{p["service"].Dir + "/GreeterService.java", "java/GreeterService.java.tmpl", false},
+		{p["http"].Dir + "/HelloController.java", "java/HelloController.java.tmpl", false},
+		{p["http"].Dir + "/HealthController.java", "java/HealthController.java.tmpl", false},
+		{p["http"].Dir + "/RequestIdFilter.java", "java/RequestIdFilter.java.tmpl", false},
+		{p["http"].Dir + "/ApiExceptionHandler.java", "java/ApiExceptionHandler.java.tmpl", false},
+		{"src/main/resources/application.yml", "java/application.yml.tmpl", false},
+		{"src/main/resources/log4j2.xml", "java/log4j2.xml.tmpl", false},
+		{"src/main/resources/log-event-template.json", "java/log-event-template.json.tmpl", false},
+		{testBase + "/" + d.App + "Tests.java", "java/ApplicationTests.java.tmpl", false},
+		{p["service"].TestDir + "/GreeterServiceTest.java", "java/GreeterServiceTest.java.tmpl", false},
+		{p["http"].TestDir + "/HelloControllerTest.java", "java/HelloControllerTest.java.tmpl", false},
+		{p["http"].TestDir + "/HealthControllerTest.java", "java/HealthControllerTest.java.tmpl", false},
 	}
 	extras := map[string]file{
-		"docker":         {"Dockerfile", "Dockerfile.tmpl"},
-		"docker-compose": {"docker-compose.yml", "docker-compose.yml.tmpl"},
-		"gitlab-ci":      {".gitlab-ci.yml", "gitlab-ci.yml.tmpl"},
-		"github-actions": {".github/workflows/ci.yml", "github-ci.yml.tmpl"},
-		"swagger":        {"docs/openapi.yaml", "openapi.yaml.tmpl"},
+		"docker":         {"Dockerfile", "java/Dockerfile.tmpl", false},
+		"docker-compose": {"docker-compose.yml", "docker-compose.yml.tmpl", false},
+		"gitlab-ci":      {".gitlab-ci.yml", "java/gitlab-ci.yml.tmpl", false},
+		"github-actions": {".github/workflows/ci.yml", "java/github-ci.yml.tmpl", false},
+		// swagger: springdoc serves the spec at /v3/api-docs; it is added in pom.xml.
+	}
+	for _, e := range o.Extras {
+		if f, ok := extras[e]; ok {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+func plan(d Data) []file {
+	if d.Java {
+		return javaPlan(d)
+	}
+	o, p := d.Opt, d.P
+	files := []file{
+		{"go.mod", "go.mod.tmpl", false},
+		{"cmd/server/main.go", "main.go.tmpl", false},
+		{p["config"].Dir + "/config.go", "config.go.tmpl", false},
+		{p["config"].Dir + "/config_test.go", "config_test.go.tmpl", false},
+		{p["logger"].Dir + "/logger.go", "logger.go.tmpl", false},
+		{p["logger"].Dir + "/logger_test.go", "logger_test.go.tmpl", false},
+		{p["domain"].Dir + "/greeting.go", "greeting.go.tmpl", false},
+		{p["service"].Dir + "/greeter.go", "greeter.go.tmpl", false},
+		{p["service"].Dir + "/greeter_test.go", "greeter_test.go.tmpl", false},
+		{p["http"].Dir + "/router.go", "http/" + o.Framework + ".go.tmpl", false},
+		{p["http"].Dir + "/router_test.go", "http/router_test.go.tmpl", false},
+		{".gitignore", "gitignore.tmpl", false},
+		{".env.example", "env.example.tmpl", false},
+		{"Makefile", "Makefile.tmpl", false},
+		{"README.md", "README.md.tmpl", false},
+	}
+	if d.HasDB {
+		files = append(files, file{p["db"].Dir + "/db.go", "db.go.tmpl", false})
+	}
+	extras := map[string]file{
+		"docker":         {"Dockerfile", "Dockerfile.tmpl", false},
+		"docker-compose": {"docker-compose.yml", "docker-compose.yml.tmpl", false},
+		"gitlab-ci":      {".gitlab-ci.yml", "gitlab-ci.yml.tmpl", false},
+		"github-actions": {".github/workflows/ci.yml", "github-ci.yml.tmpl", false},
+		"swagger":        {"docs/openapi.yaml", "openapi.yaml.tmpl", false},
 	}
 	for _, e := range o.Extras {
 		files = append(files, extras[e])
@@ -200,6 +313,14 @@ func Render(o options.Options, v versions.Versions) (map[string][]byte, error) {
 	d := NewData(o, v)
 	out := map[string][]byte{}
 	for _, f := range plan(d) {
+		if f.static {
+			b, err := fs.ReadFile(templateFS, path.Join("static", f.tmpl))
+			if err != nil {
+				return nil, err
+			}
+			out[f.out] = b
+			continue
+		}
 		b, err := renderOne(f.tmpl, d)
 		if err != nil {
 			return nil, err
@@ -260,7 +381,11 @@ func Generate(o options.Options, v versions.Versions, dir string, fl Flags) (Res
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			return res, err
 		}
-		if err := os.WriteFile(full, files[p], 0o644); err != nil {
+		mode := os.FileMode(0o644)
+		if path.Base(p) == "mvnw" {
+			mode = 0o755 // the Maven Wrapper must be executable
+		}
+		if err := os.WriteFile(full, files[p], mode); err != nil {
 			return res, err
 		}
 	}

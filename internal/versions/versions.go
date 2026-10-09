@@ -5,6 +5,8 @@
 //   - Go modules:     proxy.golang.org (official Go module mirror)
 //   - Docker images:  hub.docker.com official images (library/*)
 //   - GitHub Actions: api.github.com latest releases
+//   - Java LTS:       api.adoptium.net (Eclipse Temurin)
+//   - Java libraries: repo1.maven.org (Maven Central)
 //
 // Fetched versions are cached in the user config dir. Built-in defaults,
 // compiled into the binary, are used when the cache is missing and the
@@ -43,7 +45,27 @@ const (
 var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL}
 
 // Actions lists every tracked GitHub Action.
-var Actions = []string{"actions/checkout", "actions/setup-go"}
+var Actions = []string{"actions/checkout", "actions/setup-go", "actions/setup-java"}
+
+// Java keys and the Maven Central artifact each one tracks ("lts" comes from Adoptium).
+const (
+	JavaLTS          = "lts"
+	JavaSpringBoot   = "spring-boot"
+	JavaMaven        = "maven"
+	JavaMavenWrapper = "maven-wrapper"
+	JavaSpringdoc    = "springdoc"
+)
+
+// JavaArtifacts maps a Java key to its Maven Central group/artifact path.
+var JavaArtifacts = map[string]string{
+	JavaSpringBoot:   "org/springframework/boot/spring-boot-starter-parent",
+	JavaMaven:        "org/apache/maven/apache-maven",
+	JavaMavenWrapper: "org/apache/maven/wrapper/maven-wrapper",
+	JavaSpringdoc:    "org/springdoc/springdoc-openapi-starter-webmvc-ui",
+}
+
+// JavaKeys lists the Java versions in display order.
+var JavaKeys = []string{JavaLTS, JavaSpringBoot, JavaMaven, JavaMavenWrapper, JavaSpringdoc}
 
 // Versions is one snapshot of technology versions.
 type Versions struct {
@@ -52,6 +74,7 @@ type Versions struct {
 	Modules   map[string]string `json:"modules"` // module path -> "v1.2.3"
 	Images    map[string]string `json:"images"`  // "postgres" -> "18-alpine", "mysql" -> "9.7"
 	Actions   map[string]string `json:"actions"` // "actions/checkout" -> "v7"
+	Java      map[string]string `json:"java"`    // "lts" -> "25", "spring-boot" -> "4.1.1"
 }
 
 //go:embed defaults.json
@@ -118,6 +141,7 @@ func Merge(base, over Versions) Versions {
 		Modules:   maps.Clone(base.Modules),
 		Images:    maps.Clone(base.Images),
 		Actions:   maps.Clone(base.Actions),
+		Java:      maps.Clone(base.Java),
 	}
 	if out.Modules == nil {
 		out.Modules = map[string]string{}
@@ -128,6 +152,9 @@ func Merge(base, over Versions) Versions {
 	if out.Actions == nil {
 		out.Actions = map[string]string{}
 	}
+	if out.Java == nil {
+		out.Java = map[string]string{}
+	}
 	if !over.FetchedAt.IsZero() {
 		out.FetchedAt = over.FetchedAt
 	}
@@ -137,6 +164,7 @@ func Merge(base, over Versions) Versions {
 	maps.Copy(out.Modules, over.Modules)
 	maps.Copy(out.Images, over.Images)
 	maps.Copy(out.Actions, over.Actions)
+	maps.Copy(out.Java, over.Java)
 	return out
 }
 
@@ -148,6 +176,8 @@ type Fetcher struct {
 	Proxy     string // https://proxy.golang.org
 	DockerHub string // https://hub.docker.com
 	GitHub    string // https://api.github.com
+	Adoptium  string // https://api.adoptium.net
+	Maven     string // https://repo1.maven.org/maven2
 }
 
 // NewFetcher returns a Fetcher for the real official sources.
@@ -158,6 +188,8 @@ func NewFetcher() *Fetcher {
 		Proxy:     "https://proxy.golang.org",
 		DockerHub: "https://hub.docker.com",
 		GitHub:    "https://api.github.com",
+		Adoptium:  "https://api.adoptium.net",
+		Maven:     "https://repo1.maven.org/maven2",
 	}
 }
 
@@ -165,7 +197,7 @@ func NewFetcher() *Fetcher {
 // one error per source that failed; callers merge the result over what they
 // already have, so a partial failure keeps the older value for that item.
 func (f *Fetcher) Fetch(ctx context.Context) (Versions, error) {
-	v := Versions{Modules: map[string]string{}, Images: map[string]string{}, Actions: map[string]string{}}
+	v := Versions{Modules: map[string]string{}, Images: map[string]string{}, Actions: map[string]string{}, Java: map[string]string{}}
 	var (
 		mu   sync.Mutex
 		wg   sync.WaitGroup
@@ -195,9 +227,13 @@ func (f *Fetcher) Fetch(ctx context.Context) (Versions, error) {
 	for _, a := range Actions {
 		do(a, func() (string, error) { return f.actionMajor(ctx, a) }, func(s string) { v.Actions[a] = s })
 	}
+	do("java lts", func() (string, error) { return f.javaLTS(ctx) }, func(s string) { v.Java[JavaLTS] = s })
+	for key, path := range JavaArtifacts {
+		do(path, func() (string, error) { return f.mavenRelease(ctx, path) }, func(s string) { v.Java[key] = s })
+	}
 	wg.Wait()
 
-	if len(errs) < 1+len(Modules)+2+len(Actions) {
+	if len(errs) < 1+len(Modules)+2+len(Actions)+1+len(JavaArtifacts) {
 		v.FetchedAt = time.Now().UTC()
 	}
 	slices.SortFunc(errs, func(a, b error) int { return strings.Compare(a.Error(), b.Error()) })
@@ -336,4 +372,57 @@ func (f *Fetcher) actionMajor(ctx context.Context, repo string) (string, error) 
 		return "", fmt.Errorf("unexpected tag %q", rel.TagName)
 	}
 	return m[1], nil
+}
+
+// javaLTS returns the newest Java LTS feature release ("25") from Adoptium.
+func (f *Fetcher) javaLTS(ctx context.Context) (string, error) {
+	var info struct {
+		MostRecentLTS int `json:"most_recent_lts"`
+	}
+	if err := f.getJSON(ctx, f.Adoptium+"/v3/info/available_releases", &info); err != nil {
+		return "", err
+	}
+	if info.MostRecentLTS < 17 {
+		return "", fmt.Errorf("unexpected LTS %d", info.MostRecentLTS)
+	}
+	return strconv.Itoa(info.MostRecentLTS), nil
+}
+
+var mavenVersionRe = regexp.MustCompile(`<version>(\d+)\.(\d+)\.(\d+)</version>`)
+
+// mavenRelease returns the highest stable x.y.z version listed in an
+// artifact's maven-metadata.xml (milestones and release candidates skipped).
+func (f *Fetcher) mavenRelease(ctx context.Context, path string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.Maven+"/"+path+"/maven-metadata.xml", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "projgen")
+	resp, err := f.Client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s: %s", req.URL, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil {
+		return "", err
+	}
+	var best [3]int
+	found := false
+	for _, m := range mavenVersionRe.FindAllStringSubmatch(string(body), -1) {
+		var v [3]int
+		for i := range v {
+			v[i], _ = strconv.Atoi(m[i+1])
+		}
+		if !found || slices.Compare(v[:], best[:]) > 0 {
+			best, found = v, true
+		}
+	}
+	if !found {
+		return "", errors.New("no stable version listed")
+	}
+	return fmt.Sprintf("%d.%d.%d", best[0], best[1], best[2]), nil
 }

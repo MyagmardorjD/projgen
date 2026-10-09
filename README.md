@@ -3,7 +3,14 @@
 [![ci](https://github.com/MyagmardorjD/projgen/actions/workflows/ci.yml/badge.svg)](https://github.com/MyagmardorjD/projgen/actions/workflows/ci.yml)
 [![e2e](https://github.com/MyagmardorjD/projgen/actions/workflows/e2e.yml/badge.svg)](https://github.com/MyagmardorjD/projgen/actions/workflows/e2e.yml)
 
-Хөгжүүлэгчийн сонгосон технологиор (хэл, framework, архитектур, өгөгдлийн сан) шууд ажилладаг төслийн суурийг үүсгэдэг хэрэгсэл. Вэб интерфейс болон CLI-тэй. Хувилбар 1 нь Go-г дэмжинэ.
+Хөгжүүлэгчийн сонгосон технологиор (хэл, framework, архитектур, өгөгдлийн сан) шууд ажилладаг төслийн суурийг үүсгэдэг хэрэгсэл. Вэб интерфейс болон CLI-тэй.
+
+| Хэл | Framework | Build |
+| --- | --- | --- |
+| Go | Gin, Echo, Fiber, net/http | `go` |
+| Java | Spring Boot (Log4j 2 JSON logging, Logback хасагдсан) | Maven Wrapper (`mvnw`), JDK = хамгийн сүүлийн LTS |
+
+Хоёулаа Layered / Clean / Hexagonal бүтэц, PostgreSQL / MySQL / DB-гүй сонголттой.
 
 ## Суулгах
 
@@ -50,7 +57,20 @@ database: postgresql      # postgresql | mysql | none
 extras: [docker, docker-compose, gitlab-ci, swagger]   # + github-actions
 ```
 
+Java төслийн хувьд:
+
+```yaml
+name: order-service
+module: com.techpartners.orderservice   # Java base package
+language: java
+framework: spring-boot
+architecture: clean
+database: postgresql
+```
+
 Үүссэн төсөл бүрт: `/health` (DB ping), `/api/v1/hello` жишээ endpoint, request_id-тай JSON logging, env-ээс уншдаг config, graceful shutdown, unit test.
+
+Java төсөлд `RequestIdFilter` хүсэлт бүрт `ThreadContext.put("request_id", ...)` хийж, дараа нь `ThreadContext.clearAll()` хийнэ. Log4j 2-ийн `JsonTemplateLayout` нь `@timestamp`, `level`, `message`, `service`, `env`, `request_id`, `logger` талбартай JSON бичнэ. `pom.xml`-ээс Logback-ийг хасдаг. Swagger сонговол springdoc нэмэгдэнэ (`/swagger-ui.html`).
 
 ## Entity нэмэх (CRUD)
 
@@ -60,7 +80,7 @@ extras: [docker, docker-compose, gitlab-ci, swagger]   # + github-actions
 projgen add entity Product name:string:required description:text price:float stock:int active:bool released_at:time
 ```
 
-Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ.
+Одоогоор зөвхөн Go төсөлд. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ.
 
 `project.yaml`-аас бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ:
 
@@ -117,5 +137,5 @@ PROJGEN_E2E=1 go test ./internal/generator -run BuildAndTest -timeout 30m
 | Workflow | Хэзээ | Юу хийдэг |
 | --- | --- | --- |
 | `ci.yml` | push, PR бүрт | gofmt, go vet, go test (Ubuntu + Windows), race detector |
-| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. Эвдэрвэл issue нээнэ |
+| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. 9 Java хослолыг `mvnw verify`-ээр шалгана. Эвдэрвэл issue нээнэ |
 | Dependabot | 7 хоног бүр | projgen-ий Go dependency, Actions-ийн хувилбарыг шинэчлэх PR |

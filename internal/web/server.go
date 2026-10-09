@@ -142,6 +142,10 @@ func rows(v versions.Versions) versionsResp {
 	for _, a := range versions.Actions {
 		add(a, v.Actions[a], "GitHub")
 	}
+	add("Java LTS", v.Java[versions.JavaLTS], "api.adoptium.net")
+	for _, k := range versions.JavaKeys[1:] {
+		add(k, v.Java[k], "Maven Central")
+	}
 	return r
 }
 

@@ -43,7 +43,7 @@ func Project(o options.Options, v versions.Versions, dir string, fl generator.Fl
 		return res, nil, err
 	}
 	var warns []Warning
-	if st.Tidy {
+	if st.Tidy && o.Language != "java" { // Java: the Maven Wrapper downloads dependencies on first build
 		if err := runIn(dir, out, "go", "mod", "tidy"); err != nil {
 			warns = append(warns, Warning{"go mod tidy", err})
 		}

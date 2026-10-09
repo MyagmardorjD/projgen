@@ -111,8 +111,8 @@ func TestNew_DefaultsToSourceRepos(t *testing.T) {
 func TestNew_InteractiveAsksLocation(t *testing.T) {
 	fakeHome(t)
 	parent := t.TempDir()
-	// name, module, location, then defaults for the stack, no extras, confirm.
-	input := "demo-api\n\n" + parent + "\n\n\n\n3\n\ny\n"
+	// name, language, module, location, then defaults for the stack, no extras, confirm.
+	input := "demo-api\n\n\n" + parent + "\n\n\n3\n\ny\n"
 	var out bytes.Buffer
 	if err := run([]string{"new", "--skip-tidy", "--no-git"}, strings.NewReader(input), &out); err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())

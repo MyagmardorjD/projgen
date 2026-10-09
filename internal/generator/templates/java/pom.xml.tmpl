@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>{{index .V.Java "spring-boot"}}</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>{{.BasePkg}}</groupId>
+    <artifactId>{{.Opt.Name}}</artifactId>
+    <version>0.1.0</version>
+    <name>{{.Opt.Name}}</name>
+
+    <properties>
+        <java.version>{{index .V.Java "lts"}}</java.version>
+    </properties>
+
+    <dependencies>
+        <!-- Logging is Log4j 2 (team standard), so Logback is excluded.
+             Declaring spring-boot-starter directly makes this exclusion win
+             for every starter that pulls it in. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-log4j2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-layout-template-json</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+{{- if .HasDB}}
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>{{.DB.JavaGroup}}</groupId>
+            <artifactId>{{.DB.JavaArtifact}}</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+{{- end}}
+{{- if .Opt.HasExtra "swagger"}}
+        <!-- OpenAPI spec at /v3/api-docs, Swagger UI at /swagger-ui.html -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>{{index .V.Java "springdoc"}}</version>
+        </dependency>
+{{- end}}
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

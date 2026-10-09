@@ -35,7 +35,7 @@ func TestAsk(t *testing.T) {
 		},
 		{
 			name:      "explicit choices with retry on bad input",
-			input:     "order-service\n\n" + other + "\n1\n9\n2\n2\n2\n1,2,2\ny\n",
+			input:     "order-service\n1\n\n" + other + "\n9\n2\n2\n2\n1,2,2\ny\n",
 			wantDir:   filepath.Join(other, "order-service"),
 			wantFW:    "echo",
 			wantArch:  "clean",
@@ -67,6 +67,21 @@ func TestAsk(t *testing.T) {
 				t.Errorf("extras = %v, want %v", o.Extras, tt.wantExtra)
 			}
 		})
+	}
+}
+
+func TestAsk_Java(t *testing.T) {
+	parent := t.TempDir()
+	// name, language 2 (Java), default package, location, defaults, no extras, confirm
+	o, dir, err := New(strings.NewReader("order-service\n2\n\n"+parent+"\n\n\n\n\n\n"), io.Discard).Ask("", parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Language != "java" || o.Framework != "spring-boot" || o.Module != "com.techpartners.orderservice" {
+		t.Errorf("got %s/%s/%s", o.Language, o.Framework, o.Module)
+	}
+	if dir != filepath.Join(parent, "order-service") {
+		t.Errorf("dir = %s", dir)
 	}
 }
 

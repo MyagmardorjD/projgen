@@ -1,0 +1,23 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: ${SERVICE_NAME:{{.Opt.Name}}}
+  main:
+    banner-mode: off
+{{- if .HasDB}}
+  datasource:
+    # Required. Credentials come only from the environment.
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USER:}
+    password: ${DATABASE_PASSWORD:}
+    hikari:
+      # Start even when the database is briefly unavailable; /health reports it.
+      initialization-fail-timeout: -1
+      connection-timeout: 2000
+  sql:
+    init:
+      mode: never
+{{- end}}

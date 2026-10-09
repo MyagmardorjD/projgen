@@ -9,7 +9,13 @@ services:
       PORT: "8080"
       LOG_LEVEL: INFO
 {{- if .HasDB}}
+{{- if .Java}}
+      DATABASE_URL: "{{.DB.JavaComposeURL}}"
+      DATABASE_USER: ${DB_USER:-app}
+      DATABASE_PASSWORD: ${DB_PASSWORD:-app}
+{{- else}}
       DATABASE_URL: "{{.DB.ComposeURL}}"
+{{- end}}
     depends_on:
       db:
         condition: service_healthy

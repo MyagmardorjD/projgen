@@ -19,6 +19,7 @@ type Choice struct {
 var (
 	Languages = []Choice{
 		{"go", "Go"},
+		{"java", "Java"},
 	}
 	Frameworks = map[string][]Choice{
 		"go": {
@@ -26,6 +27,9 @@ var (
 			{"echo", "Echo"},
 			{"fiber", "Fiber"},
 			{"nethttp", "net/http (standard library)"},
+		},
+		"java": {
+			{"spring-boot", "Spring Boot (Maven, Log4j 2 JSON)"},
 		},
 	}
 	Architectures = []Choice{
@@ -62,9 +66,44 @@ type Options struct {
 func (o Options) HasExtra(name string) bool { return slices.Contains(o.Extras, name) }
 
 var (
-	nameRe   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
-	moduleRe = regexp.MustCompile(`^[A-Za-z0-9._~\-/]+$`)
+	nameRe    = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
+	moduleRe  = regexp.MustCompile(`^[A-Za-z0-9._~\-/]+$`)
+	javaPkgRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
+	javaWords = []string{"abstract", "boolean", "byte", "case", "catch", "char", "class", "const", "default", "do", "double",
+		"else", "enum", "extends", "final", "float", "for", "goto", "if", "import", "int", "interface", "long", "new",
+		"package", "private", "protected", "public", "return", "short", "static", "super", "switch", "this", "throw",
+		"try", "void", "while", "true", "false", "null"}
 )
+
+// DefaultModule suggests a module (Go) or base package (Java) for a project name.
+func DefaultModule(language, name string) string {
+	if language == "java" {
+		pkg := strings.ToLower(regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(name, ""))
+		if pkg == "" || pkg[0] >= '0' && pkg[0] <= '9' {
+			pkg = "app" + pkg
+		}
+		return "com.techpartners." + pkg
+	}
+	return "github.com/MyagmardorjD/" + name
+}
+
+func validModule(language, m string) error {
+	if language == "java" {
+		if !javaPkgRe.MatchString(m) {
+			return fmt.Errorf("module %q: for Java use a base package like com.techpartners.orderservice", m)
+		}
+		for _, part := range strings.Split(m, ".") {
+			if slices.Contains(javaWords, part) {
+				return fmt.Errorf("module %q: %q is a Java keyword", m, part)
+			}
+		}
+		return nil
+	}
+	if m == "" || !moduleRe.MatchString(m) || strings.HasPrefix(m, "/") || strings.HasSuffix(m, "/") {
+		return fmt.Errorf("module %q: not a valid Go module path", m)
+	}
+	return nil
+}
 
 // Validate returns every problem found, joined, or nil.
 func (o Options) Validate() error {
@@ -72,8 +111,8 @@ func (o Options) Validate() error {
 	if !nameRe.MatchString(o.Name) {
 		errs = append(errs, fmt.Errorf("name %q: use 2-63 lowercase letters, digits or '-', starting with a letter", o.Name))
 	}
-	if o.Module == "" || !moduleRe.MatchString(o.Module) || strings.HasPrefix(o.Module, "/") || strings.HasSuffix(o.Module, "/") {
-		errs = append(errs, fmt.Errorf("module %q: not a valid Go module path", o.Module))
+	if err := validModule(o.Language, o.Module); err != nil {
+		errs = append(errs, err)
 	}
 	if !has(Languages, o.Language) {
 		errs = append(errs, fmt.Errorf("language %q: supported: %s", o.Language, values(Languages)))

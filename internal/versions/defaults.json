@@ -13,6 +13,14 @@
   },
   "actions": {
     "actions/checkout": "v7",
-    "actions/setup-go": "v7"
+    "actions/setup-go": "v7",
+    "actions/setup-java": "v6"
+  },
+  "java": {
+    "lts": "25",
+    "spring-boot": "4.1.1",
+    "maven": "3.10.0",
+    "maven-wrapper": "3.3.4",
+    "springdoc": "3.1.1"
   }
 }

@@ -1,0 +1,27 @@
+stages:
+  - test
+  - build
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+cache:
+  paths:
+    - .m2/repository
+
+test:
+  stage: test
+  image: eclipse-temurin:{{index .V.Java "lts"}}-jdk
+  script:
+    - chmod +x mvnw
+    - ./mvnw -B verify
+
+build:
+  stage: build
+  image: eclipse-temurin:{{index .V.Java "lts"}}-jdk
+  script:
+    - chmod +x mvnw
+    - ./mvnw -B package -DskipTests
+  artifacts:
+    paths:
+      - target/*.jar

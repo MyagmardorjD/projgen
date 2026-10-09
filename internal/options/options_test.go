@@ -34,6 +34,18 @@ func TestValidate(t *testing.T) {
 		{"unknown extra", func(o *Options) { o.Extras = []string{"jenkins"} }, "extra \"jenkins\""},
 		{"duplicate extra", func(o *Options) { o.Extras = []string{"docker", "docker"} }, "listed twice"},
 		{"compose without docker", func(o *Options) { o.Extras = []string{"docker-compose"} }, "requires docker"},
+		{"java project", func(o *Options) {
+			o.Language, o.Framework, o.Module = "java", "spring-boot", "com.techpartners.orderservice"
+		}, ""},
+		{"java with go module path", func(o *Options) {
+			o.Language, o.Framework = "java", "spring-boot"
+		}, "base package"},
+		{"java keyword in package", func(o *Options) {
+			o.Language, o.Framework, o.Module = "java", "spring-boot", "com.example.new"
+		}, "Java keyword"},
+		{"go framework for java", func(o *Options) {
+			o.Language, o.Module = "java", "com.techpartners.x"
+		}, "not available for java"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,6 +71,24 @@ func TestValidate_ReportsAllProblems(t *testing.T) {
 	for _, want := range []string{"name", "module", "architecture", "database"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got %v", want, err)
+		}
+	}
+}
+
+func TestDefaultModule(t *testing.T) {
+	tests := []struct{ lang, name, want string }{
+		{"go", "order-service", "github.com/MyagmardorjD/order-service"},
+		{"java", "order-service", "com.techpartners.orderservice"},
+		{"java", "2fa-api", "com.techpartners.app2faapi"},
+	}
+	for _, tt := range tests {
+		if got := DefaultModule(tt.lang, tt.name); got != tt.want {
+			t.Errorf("DefaultModule(%s, %s) = %s, want %s", tt.lang, tt.name, got, tt.want)
+		}
+		if tt.lang == "java" {
+			if err := validModule("java", DefaultModule(tt.lang, tt.name)); err != nil {
+				t.Errorf("default module invalid: %v", err)
+			}
 		}
 	}
 }

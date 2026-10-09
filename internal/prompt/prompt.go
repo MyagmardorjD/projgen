@@ -39,7 +39,14 @@ func (p *Prompter) Ask(fixedDir, defaultParent string) (options.Options, string,
 	if o.Name, err = p.text("Project name", "my-service"); err != nil {
 		return o, "", err
 	}
-	if o.Module, err = p.text("Go module path", "github.com/MyagmardorjD/"+o.Name); err != nil {
+	if o.Language, err = p.choice("Language", options.Languages); err != nil {
+		return o, "", err
+	}
+	moduleLabel := "Go module path"
+	if o.Language == "java" {
+		moduleLabel = "Java base package"
+	}
+	if o.Module, err = p.text(moduleLabel, options.DefaultModule(o.Language, o.Name)); err != nil {
 		return o, "", err
 	}
 	dir := fixedDir
@@ -85,9 +92,6 @@ func ExpandHome(path string) string {
 // askStack asks for the technology choices and validates them.
 func (p *Prompter) askStack(o options.Options) (options.Options, error) {
 	var err error
-	if o.Language, err = p.choice("Language", options.Languages); err != nil {
-		return o, err
-	}
 	if o.Framework, err = p.choice("Framework", options.Frameworks[o.Language]); err != nil {
 		return o, err
 	}

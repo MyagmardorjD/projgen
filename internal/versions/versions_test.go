@@ -33,6 +33,11 @@ func fakeSources(t *testing.T, broken map[string]bool) *Fetcher {
 	for _, a := range Actions {
 		mux.HandleFunc("/gh/repos/"+a+"/releases/latest", reply(a, `{"tag_name":"v8.1.0"}`))
 	}
+	mux.HandleFunc("/adoptium/v3/info/available_releases", reply("java lts", `{"most_recent_lts":29,"most_recent_feature_release":31}`))
+	for _, path := range JavaArtifacts {
+		mux.HandleFunc("/maven/"+path+"/maven-metadata.xml", reply(path,
+			`<metadata><versioning><release>8.0.0-M1</release><versions><version>7.9.1</version><version>7.10.0</version><version>8.0.0-M1</version><version>7.2.15</version></versions></versioning></metadata>`))
+	}
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return &Fetcher{
@@ -41,6 +46,8 @@ func fakeSources(t *testing.T, broken map[string]bool) *Fetcher {
 		Proxy:     srv.URL + "/proxy",
 		DockerHub: srv.URL + "/hub",
 		GitHub:    srv.URL + "/gh",
+		Adoptium:  srv.URL + "/adoptium",
+		Maven:     srv.URL + "/maven",
 	}
 }
 
@@ -68,6 +75,14 @@ func TestFetch(t *testing.T) {
 			t.Errorf("%s = %q, want v8", a, v.Actions[a])
 		}
 	}
+	if v.Java[JavaLTS] != "29" {
+		t.Errorf("java lts = %q, want 29", v.Java[JavaLTS])
+	}
+	for key := range JavaArtifacts {
+		if v.Java[key] != "7.10.0" {
+			t.Errorf("java %s = %q, want 7.10.0 (highest stable, numeric order, milestone skipped)", key, v.Java[key])
+		}
+	}
 	if v.FetchedAt.IsZero() {
 		t.Error("FetchedAt not set")
 	}
@@ -92,7 +107,10 @@ func TestFetch_PartialFailureKeepsOldValues(t *testing.T) {
 }
 
 func TestFetch_AllFail(t *testing.T) {
-	broken := map[string]bool{"go": true, "postgres": true, "mysql": true}
+	broken := map[string]bool{"go": true, "postgres": true, "mysql": true, "java lts": true}
+	for _, path := range JavaArtifacts {
+		broken[path] = true
+	}
 	for _, m := range Modules {
 		broken[m] = true
 	}
@@ -128,6 +146,11 @@ func TestDefaultsComplete(t *testing.T) {
 			t.Errorf("default for %s missing", a)
 		}
 	}
+	for _, k := range JavaKeys {
+		if d.Java[k] == "" {
+			t.Errorf("default java %s missing", k)
+		}
+	}
 }
 
 func TestSaveLoad(t *testing.T) {
@@ -161,13 +184,14 @@ func TestFetch_GitHubTokenOnlySentToGitHub(t *testing.T) {
 		http.Error(w, "nothing here", http.StatusNotFound)
 	}))
 	defer srv.Close()
-	f := &Fetcher{Client: srv.Client(), GoDL: srv.URL + "/dl", Proxy: srv.URL + "/proxy", DockerHub: srv.URL + "/hub", GitHub: srv.URL + "/gh"}
+	f := &Fetcher{Client: srv.Client(), GoDL: srv.URL + "/dl", Proxy: srv.URL + "/proxy", DockerHub: srv.URL + "/hub", GitHub: srv.URL + "/gh",
+		Adoptium: srv.URL + "/adoptium", Maven: srv.URL + "/maven"}
 	_, _ = f.Fetch(context.Background())
 
 	if auth["gh"] != "Bearer test-token" {
 		t.Errorf("GitHub request auth = %q, want the token", auth["gh"])
 	}
-	for _, src := range []string{"dl", "proxy", "hub"} {
+	for _, src := range []string{"dl", "proxy", "hub", "adoptium", "maven"} {
 		if auth[src] != "" {
 			t.Errorf("token leaked to %s", src)
 		}

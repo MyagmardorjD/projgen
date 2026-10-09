@@ -1,0 +1,9 @@
+package {{.P.domain.Name}};
+
+/** Thrown when a name is longer than {@link Greeting#MAX_NAME_LENGTH}. */
+public class NameTooLongException extends RuntimeException {
+
+    public NameTooLongException() {
+        super("name must be at most " + Greeting.MAX_NAME_LENGTH + " characters");
+    }
+}

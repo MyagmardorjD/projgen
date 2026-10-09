@@ -160,6 +160,9 @@ func readProject(dir string) (options.Options, error) {
 	if err := o.Validate(); err != nil {
 		return o, fmt.Errorf("project.yaml: %w", err)
 	}
+	if o.Language != "go" {
+		return o, fmt.Errorf("add entity supports Go projects only for now; this is a %s project", o.Language)
+	}
 	return o, nil
 }
 

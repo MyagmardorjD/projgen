@@ -1,0 +1,58 @@
+package {{.P.http.Name}};
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import {{.P.service.Name}}.GreeterService;
+import org.apache.logging.log4j.ThreadContext;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+class HelloControllerTest {
+
+    private final MockMvc mvc = MockMvcBuilders
+            .standaloneSetup(new HelloController(new GreeterService()))
+            .setControllerAdvice(new ApiExceptionHandler())
+            .addFilters(new RequestIdFilter())
+            .build();
+
+    @Test
+    void helloDefault() throws Exception {
+        mvc.perform(get("/api/v1/hello"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"message\":\"Hello, World!\"")));
+    }
+
+    @Test
+    void helloName() throws Exception {
+        mvc.perform(get("/api/v1/hello").param("name", "Bat"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Hello, Bat!")));
+    }
+
+    @Test
+    void nameTooLongIsBadRequest() throws Exception {
+        mvc.perform(get("/api/v1/hello").param("name", "a".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("at most 100")));
+    }
+
+    @Test
+    void echoesSafeRequestId() throws Exception {
+        mvc.perform(get("/api/v1/hello").header(RequestIdFilter.HEADER, "abc-123"))
+                .andExpect(header().string(RequestIdFilter.HEADER, "abc-123"));
+    }
+
+    @Test
+    void generatesRequestIdAndClearsThreadContext() throws Exception {
+        String id = mvc.perform(get("/api/v1/hello").header(RequestIdFilter.HEADER, "<script>"))
+                .andReturn().getResponse().getHeader(RequestIdFilter.HEADER);
+        assertThat(id).hasSize(32).isNotEqualTo("<script>");
+        assertThat(ThreadContext.get("request_id")).isNull();
+    }
+}

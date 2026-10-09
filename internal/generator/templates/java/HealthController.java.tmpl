@@ -1,0 +1,45 @@
+package {{.P.http.Name}};
+
+import java.util.Map;
+{{- if .HasDB}}
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+{{- end}}
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/** GET /health: 200 when the service{{if .HasDB}} and its database are{{else}} is{{end}} up{{if .HasDB}}, 503 otherwise{{end}}. */
+@RestController
+public class HealthController {
+{{- if .HasDB}}
+
+    private static final Logger LOG = LogManager.getLogger(HealthController.class);
+
+    private final JdbcTemplate jdbc;
+
+    public HealthController(JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, String>> health() {
+        try {
+            jdbc.queryForObject("SELECT 1", Integer.class);
+            return ResponseEntity.ok(Map.of("status", "ok"));
+        } catch (DataAccessException e) {
+            LOG.error("health check failed", e);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "unavailable"));
+        }
+    }
+{{- else}}
+
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, String>> health() {
+        return ResponseEntity.ok(Map.of("status", "ok"));
+    }
+{{- end}}
+}

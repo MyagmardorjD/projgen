@@ -3,6 +3,7 @@
 #               and without entities, built and tested with the latest
 #               versions from the official sources
 #   database  - generated repositories run against real PostgreSQL and MySQL
+#   java      - every Java (Spring Boot) combination built with ./mvnw verify
 # Opens an issue when a scheduled or push run fails.
 name: e2e
 
@@ -80,8 +81,33 @@ jobs:
           PROJGEN_TEST_MYSQL_URL: app:app@tcp(localhost:3306)/app?parseTime=true
         run: go test -count=1 -run TestAdded_RealDatabase -v -timeout 15m ./internal/entity
 
+  java:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Generated projects target the newest Java LTS, so test with that JDK.
+      - name: Find the latest Java LTS
+        id: lts
+        run: echo "version=$(curl -fsS https://api.adoptium.net/v3/info/available_releases | jq -r .most_recent_lts)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ steps.lts.outputs.version }}
+
+      - name: Build and test generated Java projects (latest versions)
+        env:
+          PROJGEN_E2E_JAVA: "1"
+          PROJGEN_E2E_LATEST: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go test -count=1 -run TestGeneratedJava_BuildAndTest -timeout 40m ./internal/generator
+
   report:
-    needs: [generated, database]
+    needs: [generated, database, java]
     if: failure() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

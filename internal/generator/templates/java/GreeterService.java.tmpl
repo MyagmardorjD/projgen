@@ -1,0 +1,22 @@
+package {{.P.service.Name}};
+
+import {{.P.domain.Name}}.Greeting;
+import {{.P.domain.Name}}.NameTooLongException;
+import org.springframework.stereotype.Service;
+
+/** The example service. Replace it with your own use cases. */
+@Service
+public class GreeterService {
+
+    /** Builds a greeting for name, defaulting to "World". */
+    public Greeting greet(String name) {
+        String n = name == null ? "" : name.strip();
+        if (n.isEmpty()) {
+            n = "World";
+        }
+        if (n.codePointCount(0, n.length()) > Greeting.MAX_NAME_LENGTH) {
+            throw new NameTooLongException();
+        }
+        return new Greeting("Hello, " + n + "!");
+    }
+}

@@ -87,7 +87,7 @@ details pre { font-family: var(--mono); font-size: 12px; background: var(--bg); 
       <section>
         <h2>Төсөл</h2>
         <label class="field"><span>Төслийн нэр</span><input type="text" id="name" value="my-service" spellcheck="false"></label>
-        <label class="field"><span>Go module зам</span><input type="text" id="module" spellcheck="false"></label>
+        <label class="field"><span id="moduleLabel">Go module зам</span><input type="text" id="module" spellcheck="false"></label>
       </section>
       <section><h2>Хэл</h2><div class="grid" id="language"></div></section>
       <section><h2>Framework</h2><div class="grid" id="framework"></div></section>
@@ -102,7 +102,7 @@ details pre { font-family: var(--mono); font-size: 12px; background: var(--bg); 
           <label style="display:block;margin-top:6px"><input type="checkbox" id="force"> Дарж бичихийг зөвшөөрөх</label>
         </div>
         <div class="checks" style="margin-top:12px">
-          <label><input type="checkbox" id="tidy" checked> go mod tidy ажиллуулах</label>
+          <label id="tidyWrap"><input type="checkbox" id="tidy" checked> go mod tidy ажиллуулах</label>
           <label><input type="checkbox" id="git" checked> git init хийх</label>
         </div>
       </section>
@@ -308,8 +308,26 @@ async function updateVersions() {
   }
 }
 
+// Mirrors options.DefaultModule: a Go module path or a Java base package.
+function defaultModule(language, name) {
+  if (language === 'java') {
+    let pkg = name.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    if (pkg === '' || /^[0-9]/.test(pkg)) pkg = 'app' + pkg;
+    return 'com.techpartners.' + pkg;
+  }
+  return 'github.com/MyagmardorjD/' + name;
+}
+
 function syncModule() {
-  if (!moduleEdited) $('module').value = 'github.com/MyagmardorjD/' + $('name').value.trim();
+  if (!moduleEdited) $('module').value = defaultModule(picked('language'), $('name').value.trim());
+}
+
+function onLanguage() {
+  const lang = picked('language');
+  choices($('framework'), 'framework', meta.frameworks[lang], 'radio');
+  $('moduleLabel').textContent = lang === 'java' ? 'Java base package' : 'Go module зам';
+  $('tidyWrap').classList.toggle('hidden', lang !== 'go');
+  syncModule();
 }
 
 async function init() {
@@ -325,7 +343,7 @@ async function init() {
 
   $('name').addEventListener('input', syncModule);
   $('module').addEventListener('input', () => { moduleEdited = true; });
-  $('language').addEventListener('change', () => choices($('framework'), 'framework', meta.frameworks[picked('language')], 'radio'));
+  $('language').addEventListener('change', onLanguage);
   $('form').addEventListener('input', schedule);
   $('form').addEventListener('change', schedule);
   $('form').addEventListener('submit', createProject);

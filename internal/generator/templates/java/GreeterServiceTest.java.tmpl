@@ -1,0 +1,38 @@
+package {{.P.service.Name}};
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import {{.P.domain.Name}}.Greeting;
+import {{.P.domain.Name}}.NameTooLongException;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+class GreeterServiceTest {
+
+    private final GreeterService greeter = new GreeterService();
+
+    static Stream<Arguments> greetings() {
+        return Stream.of(
+                Arguments.of(null, "Hello, World!"),
+                Arguments.of("", "Hello, World!"),
+                Arguments.of("  Bat  ", "Hello, Bat!"),
+                Arguments.of("Сараа", "Hello, Сараа!"),
+                Arguments.of("a".repeat(Greeting.MAX_NAME_LENGTH), "Hello, " + "a".repeat(Greeting.MAX_NAME_LENGTH) + "!"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("greetings")
+    void greets(String name, String want) {
+        assertThat(greeter.greet(name).message()).isEqualTo(want);
+    }
+
+    @Test
+    void rejectsTooLongName() {
+        assertThatThrownBy(() -> greeter.greet("a".repeat(Greeting.MAX_NAME_LENGTH + 1)))
+                .isInstanceOf(NameTooLongException.class);
+    }
+}

@@ -1,0 +1,19 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@{{index .V.Actions "actions/checkout"}}
+      - uses: actions/setup-java@{{index .V.Actions "actions/setup-java"}}
+        with:
+          distribution: temurin
+          java-version: "{{index .V.Java "lts"}}"
+          cache: maven
+      - name: Build and test
+        run: ./mvnw -B verify
