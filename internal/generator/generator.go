@@ -18,7 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/techpartners/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/options"
 )
 
 //go:embed all:templates

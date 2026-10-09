@@ -16,9 +16,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/techpartners/projgen/internal/generator"
-	"github.com/techpartners/projgen/internal/options"
-	"github.com/techpartners/projgen/internal/prompt"
+	"github.com/MyagmardorjD/projgen/internal/generator"
+	"github.com/MyagmardorjD/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/prompt"
 )
 
 const version = "0.1.0"

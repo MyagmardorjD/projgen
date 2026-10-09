@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/techpartners/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/options"
 )
 
 func opts(fw, arch, db string, extras ...string) options.Options {

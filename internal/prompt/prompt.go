@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/techpartners/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/options"
 )
 
 // ErrCancelled is returned when the developer does not confirm.

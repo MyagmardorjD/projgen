@@ -1,4 +1,4 @@
-module github.com/techpartners/projgen
+module github.com/MyagmardorjD/projgen
 
 go 1.27.1
 
