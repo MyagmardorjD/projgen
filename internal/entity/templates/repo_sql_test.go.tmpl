@@ -1,0 +1,116 @@
+{{- $d := .P.domain.Name -}}
+package {{.P.db.Name}}
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"{{.P.domain.Import}}"
+)
+
+// open{{.E.Name}}TestDB connects to TEST_DATABASE_URL and recreates the
+// {{.E.Table}} table from its migration. Without the variable the test is skipped,
+// so go test ./... stays fast and needs no database.
+func open{{.E.Name}}TestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run repository tests against a real database")
+	}
+	db, err := Open(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	migrate := func(kind string) {
+		files, _ := filepath.Glob(filepath.Join("{{.MigrationsRel}}", "*_create_{{.E.Table}}."+kind+".sql"))
+		if len(files) == 0 {
+			t.Fatalf("no %s migration for {{.E.Table}}", kind)
+		}
+		b, err := os.ReadFile(files[len(files)-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(b)); err != nil {
+			t.Fatalf("%s migration: %v", kind, err)
+		}
+	}
+	migrate("down")
+	migrate("up")
+	t.Cleanup(func() { migrate("down") })
+	return db
+}
+
+func Test{{.E.Name}}Repository_CRUD(t *testing.T) {
+	ctx := context.Background()
+	r := New{{.E.Name}}Repository(open{{.E.Name}}TestDB(t))
+	in := {{$d}}.{{.E.Name}}Input{
+{{- range .Fields}}
+		{{.Go}}: {{.Sample}},
+{{- end}}
+	}
+	same := func(t *testing.T, got {{$d}}.{{.E.Name}}) {
+		t.Helper()
+{{- range .Fields}}
+{{- if eq .GoType "time.Time"}}
+		if !got.{{.Go}}.Equal(in.{{.Go}}) {
+{{- else}}
+		if got.{{.Go}} != in.{{.Go}} {
+{{- end}}
+			t.Errorf("{{.JSON}} = %v, want %v", got.{{.Go}}, in.{{.Go}})
+		}
+{{- end}}
+		if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
+			t.Error("timestamps not set")
+		}
+	}
+
+	created, err := r.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.ID == 0 {
+		t.Fatal("create: no id")
+	}
+	same(t, created)
+
+	got, err := r.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	same(t, got)
+
+	list, err := r.List(ctx, 10, 0)
+	if err != nil || len(list) != 1 || list[0].ID != created.ID {
+		t.Fatalf("list = %v, %v; want the created record", list, err)
+	}
+	if list, err := r.List(ctx, 10, 1); err != nil || len(list) != 0 {
+		t.Errorf("list offset 1 = %v, %v; want empty", list, err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	updated, err := r.Update(ctx, created.ID, in)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	same(t, updated)
+	if _, err := r.Update(ctx, created.ID+1000, in); !errors.Is(err, {{$d}}.ErrNotFound) {
+		t.Errorf("update missing: err = %v, want ErrNotFound", err)
+	}
+
+	if err := r.Delete(ctx, created.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := r.Get(ctx, created.ID); !errors.Is(err, {{$d}}.ErrNotFound) {
+		t.Errorf("get deleted: err = %v, want ErrNotFound", err)
+	}
+	if err := r.Delete(ctx, created.ID); !errors.Is(err, {{$d}}.ErrNotFound) {
+		t.Errorf("delete twice: err = %v, want ErrNotFound", err)
+	}
+}

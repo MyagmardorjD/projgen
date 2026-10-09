@@ -137,7 +137,7 @@ var databases = map[string]DB{
 
 // NewData builds template data for valid options and the given versions.
 func NewData(o options.Options, v versions.Versions) Data {
-	dbShort := map[string]string{"postgresql": "postgres", "mysql": "mysql"}[o.Database]
+	dbShort := map[string]string{"postgresql": "postgres", "mysql": "mysql", "none": "memory"}[o.Database]
 	p := map[string]Pkg{}
 	for comp, v := range layouts[o.Architecture] {
 		dir := strings.ReplaceAll(v[0], "{db}", dbShort)

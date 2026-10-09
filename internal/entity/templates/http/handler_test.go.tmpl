@@ -1,0 +1,82 @@
+{{- $d := .P.domain.Name -}}
+{{- $s := .P.service.Name -}}
+package {{.P.http.Name}}
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"{{.P.domain.Import}}"
+	{{$s}} "{{.P.service.Import}}"
+)
+
+{{template "fake_repo.tmpl" .}}
+
+// Test{{.E.Name}}Routes walks one record through create, read, list,
+// update and delete, checking status codes and error cases on the way.
+func Test{{.E.Name}}Routes(t *testing.T) {
+	d := testDeps(nil)
+	d.{{.E.Plural}} = {{$s}}.New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+	const base = "/api/v1/{{.E.Route}}"
+	valid := `{ {{- .SampleJSON -}} }`
+
+	steps := []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		wantStatus int
+		wantBody   string
+	}{
+		{"create", http.MethodPost, base, valid, http.StatusCreated, `"id":1`},
+		{"create invalid json", http.MethodPost, base, `{`, http.StatusBadRequest, "invalid JSON"},
+{{- if .FirstRequired}}
+		{"create without {{.FirstRequired.JSON}}", http.MethodPost, base, `{}`, http.StatusUnprocessableEntity, "{{.FirstRequired.JSON}} is required"},
+{{- end}}
+		{"get", http.MethodGet, base + "/1", "", http.StatusOK, `"id":1`},
+		{"get missing", http.MethodGet, base + "/999", "", http.StatusNotFound, "not found"},
+		{"get bad id", http.MethodGet, base + "/abc", "", http.StatusBadRequest, "invalid id"},
+		{"list", http.MethodGet, base + "?limit=10&offset=0", "", http.StatusOK, `"id":1`},
+		{"update", http.MethodPut, base + "/1", valid, http.StatusOK, `"id":1`},
+		{"update missing", http.MethodPut, base + "/999", valid, http.StatusNotFound, "not found"},
+		{"delete", http.MethodDelete, base + "/1", "", http.StatusNoContent, ""},
+		{"delete again", http.MethodDelete, base + "/1", "", http.StatusNotFound, "not found"},
+		{"list empty", http.MethodGet, base, "", http.StatusOK, "[]"},
+	}
+	for _, st := range steps {
+		req := httptest.NewRequest(st.method, st.path, strings.NewReader(st.body))
+		req.Header.Set("Content-Type", "application/json")
+		status, got, _ := do(t, d, req)
+		if status != st.wantStatus {
+			t.Fatalf("%s: status = %d, want %d (body %s)", st.name, status, st.wantStatus, got)
+		}
+		if !strings.Contains(got, st.wantBody) {
+			t.Errorf("%s: body = %s, want to contain %s", st.name, got, st.wantBody)
+		}
+	}
+}
+
+// The response must be the {{.E.Name}} JSON shape clients rely on.
+func Test{{.E.Name}}JSONShape(t *testing.T) {
+	d := testDeps(nil)
+	d.{{.E.Plural}} = {{$s}}.New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/{{.E.Route}}", strings.NewReader(`{ {{- .SampleJSON -}} }`))
+	req.Header.Set("Content-Type", "application/json")
+	_, body, _ := do(t, d, req)
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, body)
+	}
+	for _, key := range []string{"id"{{range .Fields}}, "{{.JSON}}"{{end}}, "created_at", "updated_at"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("response missing %q: %s", key, body)
+		}
+	}
+}

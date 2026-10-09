@@ -1,0 +1,10 @@
+package {{.P.domain.Name}}
+
+import "errors"
+
+var (
+	// ErrNotFound is returned when a record does not exist.
+	ErrNotFound = errors.New("not found")
+	// ErrValidation wraps input validation errors.
+	ErrValidation = errors.New("validation failed")
+)

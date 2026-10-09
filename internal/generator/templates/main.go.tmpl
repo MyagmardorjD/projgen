@@ -49,6 +49,8 @@ func run() error {
 	deps.Health = conn
 {{- end}}
 
+	// projgen:wire (projgen add entity inserts wiring here)
+
 	sys.Info("server starting", "port", cfg.Port)
 	if err := {{.P.http.Name}}.Serve(ctx, ":"+cfg.Port, deps); err != nil {
 		sys.Error("server stopped with error", "error", err)

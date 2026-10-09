@@ -1,0 +1,79 @@
+{{- /* Shared by the service and handler tests: an in-memory test double. */ -}}
+{{- $d := .P.domain.Name -}}
+// fake{{.E.Name}}Repo is an in-memory {{$d}}.{{.E.Name}}Repository for tests.
+type fake{{.E.Name}}Repo struct {
+	mu         sync.Mutex
+	items      map[int64]{{$d}}.{{.E.Name}}
+	next       int64
+	lastLimit  int
+	lastOffset int
+}
+
+func newFake{{.E.Name}}Repo() *fake{{.E.Name}}Repo {
+	return &fake{{.E.Name}}Repo{items: map[int64]{{$d}}.{{.E.Name}}{}}
+}
+
+func (f *fake{{.E.Name}}Repo) Create(_ context.Context, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.next++
+	now := time.Now().UTC()
+	x := {{$d}}.{{.E.Name}}{ID: f.next, CreatedAt: now, UpdatedAt: now{{range .Fields}}, {{.Go}}: in.{{.Go}}{{end}}}
+	f.items[x.ID] = x
+	return x, nil
+}
+
+func (f *fake{{.E.Name}}Repo) Get(_ context.Context, id int64) ({{$d}}.{{.E.Name}}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	x, ok := f.items[id]
+	if !ok {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+	return x, nil
+}
+
+func (f *fake{{.E.Name}}Repo) List(_ context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastLimit, f.lastOffset = limit, offset
+	out := []{{$d}}.{{.E.Name}}{}
+	for id := int64(1); id <= f.next; id++ {
+		if x, ok := f.items[id]; ok {
+			out = append(out, x)
+		}
+	}
+	if offset >= len(out) {
+		return []{{$d}}.{{.E.Name}}{}, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (f *fake{{.E.Name}}Repo) Update(_ context.Context, id int64, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	x, ok := f.items[id]
+	if !ok {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+{{- range .Fields}}
+	x.{{.Go}} = in.{{.Go}}
+{{- end}}
+	x.UpdatedAt = time.Now().UTC()
+	f.items[id] = x
+	return x, nil
+}
+
+func (f *fake{{.E.Name}}Repo) Delete(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.items[id]; !ok {
+		return {{$d}}.ErrNotFound
+	}
+	delete(f.items, id)
+	return nil
+}

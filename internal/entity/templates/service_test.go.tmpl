@@ -1,0 +1,103 @@
+{{- $d := .P.domain.Name -}}
+package {{.P.service.Name}}
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"{{.P.domain.Import}}"
+)
+
+{{template "fake_repo.tmpl" .}}
+
+func valid{{.E.Name}}Input() {{$d}}.{{.E.Name}}Input {
+	return {{$d}}.{{.E.Name}}Input{
+{{- range .Fields}}
+		{{.Go}}: {{.Sample}},
+{{- end}}
+	}
+}
+
+func Test{{.E.Name}}Service_Create(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*{{$d}}.{{.E.Name}}Input)
+		wantErr error
+	}{
+		{"valid", func(*{{$d}}.{{.E.Name}}Input) {}, nil},
+{{- range .Fields}}
+{{- if .Required}}
+		{"{{.JSON}} blank", func(in *{{$d}}.{{$.E.Name}}Input) { in.{{.Go}} = "  " }, {{$d}}.ErrValidation},
+{{- end}}
+{{- end}}
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+			in := valid{{.E.Name}}Input()
+			tt.mutate(&in)
+			got, err := s.Create(context.Background(), in)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && got.ID == 0 {
+				t.Error("expected an ID")
+			}
+		})
+	}
+}
+
+func Test{{.E.Name}}Service_GetUpdateDelete(t *testing.T) {
+	ctx := context.Background()
+	s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+	created, err := s.Create(ctx, valid{{.E.Name}}Input())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Get(ctx, created.ID); err != nil {
+		t.Errorf("get: %v", err)
+	}
+	for _, id := range []int64{0, -1, 999} {
+		if _, err := s.Get(ctx, id); !errors.Is(err, {{$d}}.ErrNotFound) {
+			t.Errorf("get %d: err = %v, want ErrNotFound", id, err)
+		}
+	}
+	if _, err := s.Update(ctx, created.ID, valid{{.E.Name}}Input()); err != nil {
+		t.Errorf("update: %v", err)
+	}
+	if _, err := s.Update(ctx, 999, valid{{.E.Name}}Input()); !errors.Is(err, {{$d}}.ErrNotFound) {
+		t.Errorf("update missing: err = %v, want ErrNotFound", err)
+	}
+	if err := s.Delete(ctx, created.ID); err != nil {
+		t.Errorf("delete: %v", err)
+	}
+	if err := s.Delete(ctx, created.ID); !errors.Is(err, {{$d}}.ErrNotFound) {
+		t.Errorf("delete twice: err = %v, want ErrNotFound", err)
+	}
+}
+
+func Test{{.E.Name}}Service_ListPaging(t *testing.T) {
+	tests := []struct {
+		limit, offset         int
+		wantLimit, wantOffset int
+	}{
+		{0, 0, 20, 0},
+		{-5, -1, 20, 0},
+		{10, 5, 10, 5},
+		{500, 0, 100, 0},
+	}
+	for _, tt := range tests {
+		repo := newFake{{.E.Name}}Repo()
+		if _, err := New{{.E.Name}}Service(repo).List(context.Background(), tt.limit, tt.offset); err != nil {
+			t.Fatal(err)
+		}
+		if repo.lastLimit != tt.wantLimit || repo.lastOffset != tt.wantOffset {
+			t.Errorf("List(%d, %d) asked repo for (%d, %d), want (%d, %d)",
+				tt.limit, tt.offset, repo.lastLimit, repo.lastOffset, tt.wantLimit, tt.wantOffset)
+		}
+	}
+}

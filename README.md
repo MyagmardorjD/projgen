@@ -52,6 +52,31 @@ extras: [docker, docker-compose, gitlab-ci, swagger]   # + github-actions
 
 Үүссэн төсөл бүрт: `/health` (DB ping), `/api/v1/hello` жишээ endpoint, request_id-тай JSON logging, env-ээс уншдаг config, graceful shutdown, unit test.
 
+## Entity нэмэх (CRUD)
+
+Үүссэн төслийн хавтсанд:
+
+```bash
+projgen add entity Product name:string:required description:text price:float stock:int active:bool released_at:time
+```
+
+Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ.
+
+`project.yaml`-аас бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ:
+
+| Файл | Агуулга |
+| --- | --- |
+| domain `product.go` | `Product`, `ProductInput` + шалгалт, `ProductRepository` interface |
+| service `product_service.go` + тест | Бизнес дүрэм, хуудаслалт (анхдагч 20, дээд тал 100) |
+| repository `product_repository.go` | PostgreSQL/MySQL SQL, DB-гүй бол санах ойд |
+| repository `product_repository_test.go` | `TEST_DATABASE_URL` өгвөл жинхэнэ DB дээр migration хийж CRUD шалгана |
+| http `product_handler.go` + тест | `POST/GET /api/v1/products`, `GET/PUT/DELETE /api/v1/products/{id}` |
+| `migrations/<огноо>_create_products.up.sql` / `.down.sql` | Хүснэгт үүсгэх / устгах |
+
+`router.go`, `main.go` дахь `// projgen:` тэмдэгтэй мөрийн өмнө шинэ entity-г автоматаар холбоно. Тэмдэггүй хуучин төсөлд юуг гараар нэмэхийг хэвлэнэ. Байгаа entity-г дахин үүсгэхэд `--force` хэрэгтэй.
+
+Алдааны хариу: шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`.
+
 ## Технологийн хувилбарууд
 
 Үүсгэх төсөлд хамгийн сүүлийн хувилбаруудыг албан ёсны эх сурвалжаас авч ашиглана:
@@ -92,5 +117,5 @@ PROJGEN_E2E=1 go test ./internal/generator -run BuildAndTest -timeout 30m
 | Workflow | Хэзээ | Юу хийдэг |
 | --- | --- | --- |
 | `ci.yml` | push, PR бүрт | gofmt, go vet, go test (Ubuntu + Windows), race detector |
-| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг хамгийн сүүлийн хувилбараар шалгана. Эвдэрвэл issue нээнэ |
+| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. Эвдэрвэл issue нээнэ |
 | Dependabot | 7 хоног бүр | projgen-ий Go dependency, Actions-ийн хувилбарыг шинэчлэх PR |

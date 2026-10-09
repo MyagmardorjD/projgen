@@ -1,0 +1,123 @@
+{{- $d := .P.domain.Name -}}
+package {{.P.db.Name}}
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"{{.P.domain.Import}}"
+)
+
+// {{.E.Name}}Repository stores {{.E.Name}} records in {{.Opt.Database}}.
+type {{.E.Name}}Repository struct {
+	db *sql.DB
+}
+
+func New{{.E.Name}}Repository(db *sql.DB) *{{.E.Name}}Repository {
+	return &{{.E.Name}}Repository{db: db}
+}
+
+const {{.E.Var}}Columns = "{{.SQL.SelectCols}}"
+
+func scan{{.E.Name}}(row interface{ Scan(...any) error }) ({{$d}}.{{.E.Name}}, error) {
+	var x {{$d}}.{{.E.Name}}
+	err := row.Scan({{.SQL.ScanArgs}})
+	return x, err
+}
+
+func (r *{{.E.Name}}Repository) Create(ctx context.Context, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+{{- if eq .Opt.Database "postgresql"}}
+	row := r.db.QueryRowContext(ctx,
+		"INSERT INTO {{.E.Table}} ({{.SQL.InsertCols}}) VALUES ({{.SQL.InsertVals}}) RETURNING "+{{.E.Var}}Columns,
+		{{.SQL.ExecArgs}})
+	x, err := scan{{.E.Name}}(row)
+	if err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("insert {{.E.Snake}}: %w", err)
+	}
+	return x, nil
+{{- else}}
+	res, err := r.db.ExecContext(ctx,
+		"INSERT INTO {{.E.Table}} ({{.SQL.InsertCols}}) VALUES ({{.SQL.InsertVals}})",
+		{{.SQL.ExecArgs}})
+	if err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("insert {{.E.Snake}}: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("insert {{.E.Snake}}: %w", err)
+	}
+	return r.Get(ctx, id)
+{{- end}}
+}
+
+func (r *{{.E.Name}}Repository) Get(ctx context.Context, id int64) ({{$d}}.{{.E.Name}}, error) {
+	x, err := scan{{.E.Name}}(r.db.QueryRowContext(ctx,
+		"SELECT "+{{.E.Var}}Columns+" FROM {{.E.Table}} WHERE id = {{.SQL.P1}}", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+	if err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("get {{.E.Snake}}: %w", err)
+	}
+	return x, nil
+}
+
+func (r *{{.E.Name}}Repository) List(ctx context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+{{.E.Var}}Columns+" FROM {{.E.Table}} ORDER BY id LIMIT {{.SQL.P1}} OFFSET {{.SQL.P2}}", limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list {{.E.Table}}: %w", err)
+	}
+	defer rows.Close()
+	items := []{{$d}}.{{.E.Name}}{}
+	for rows.Next() {
+		x, err := scan{{.E.Name}}(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list {{.E.Table}}: %w", err)
+		}
+		items = append(items, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list {{.E.Table}}: %w", err)
+	}
+	return items, nil
+}
+
+func (r *{{.E.Name}}Repository) Update(ctx context.Context, id int64, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+{{- if eq .Opt.Database "postgresql"}}
+	x, err := scan{{.E.Name}}(r.db.QueryRowContext(ctx,
+		"UPDATE {{.E.Table}} SET {{.SQL.UpdateSet}}, updated_at = now() WHERE id = {{.SQL.UpdateWhere}} RETURNING "+{{.E.Var}}Columns,
+		{{.SQL.ExecArgs}}, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+	if err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("update {{.E.Snake}}: %w", err)
+	}
+	return x, nil
+{{- else}}
+	if _, err := r.db.ExecContext(ctx,
+		"UPDATE {{.E.Table}} SET {{.SQL.UpdateSet}} WHERE id = {{.SQL.UpdateWhere}}",
+		{{.SQL.ExecArgs}}, id); err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("update {{.E.Snake}}: %w", err)
+	}
+	return r.Get(ctx, id)
+{{- end}}
+}
+
+func (r *{{.E.Name}}Repository) Delete(ctx context.Context, id int64) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM {{.E.Table}} WHERE id = {{.SQL.P1}}", id)
+	if err != nil {
+		return fmt.Errorf("delete {{.E.Snake}}: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete {{.E.Snake}}: %w", err)
+	}
+	if n == 0 {
+		return {{$d}}.ErrNotFound
+	}
+	return nil
+}

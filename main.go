@@ -3,6 +3,7 @@
 //	projgen new                       ask questions interactively
 //	projgen new --config project.yaml read choices from a file
 //	projgen list                      show supported options
+//	projgen add entity Product name:string:required price:float
 //	projgen serve                     pick options in the browser
 //	projgen update                    fetch latest technology versions
 //	projgen versions                  show the versions new projects will use
@@ -19,11 +20,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/MyagmardorjD/projgen/internal/create"
+	"github.com/MyagmardorjD/projgen/internal/entity"
 	"github.com/MyagmardorjD/projgen/internal/generator"
 	"github.com/MyagmardorjD/projgen/internal/options"
 	"github.com/MyagmardorjD/projgen/internal/prompt"
@@ -57,6 +60,8 @@ func run(args []string, in io.Reader, out io.Writer) error {
 	case "list":
 		cmdList(out)
 		return nil
+	case "add":
+		return cmdAdd(args[1:], out)
 	case "serve":
 		return cmdServe(args[1:], out)
 	case "update":
@@ -80,6 +85,9 @@ func usage(out io.Writer) {
 
 Usage:
   projgen new [flags]   create a project (asks questions unless --config is given)
+  projgen add entity NAME FIELD...
+                        add a CRUD resource to the project in the current folder
+                        FIELD is name:type or name:type:required
   projgen serve         open the web UI to pick options, download a ZIP or create locally
   projgen list          show supported languages, frameworks, architectures, databases, extras
   projgen update        fetch the latest versions from official sources
@@ -95,6 +103,10 @@ Flags for new:
   --skip-tidy     do not run "go mod tidy" after generating
   --no-git        do not run "git init"
   --offline       do not check official sources for newer versions
+
+Flags for add entity:
+  --dir DIR       project folder (default: current folder)
+  --force         overwrite files the entity already has
 
 Flags for serve:
   --port N        port on 127.0.0.1 (default 8090)
@@ -169,6 +181,69 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 
 	fmt.Fprintf(out, "\nProject location: %s\n", dir)
 	fmt.Fprintf(out, "\nNext steps:\n  cd \"%s\"\n  go test ./...\n  go run ./cmd/server\n", dir)
+	return nil
+}
+
+func cmdAdd(args []string, out io.Writer) error {
+	if len(args) == 0 || args[0] != "entity" {
+		return errors.New(`usage: projgen add entity NAME FIELD... (e.g. projgen add entity Product name:string:required price:float)`)
+	}
+	dir, force := ".", false
+	var rest []string
+	for i := 1; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--force":
+			force = true
+		case a == "--dir" && i+1 < len(args):
+			dir = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--dir="):
+			dir = strings.TrimPrefix(a, "--dir=")
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %s", a)
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if len(rest) == 0 {
+		return errors.New("missing entity name")
+	}
+	spec, err := entity.Parse(rest[0], rest[1:])
+	if err != nil {
+		return fmt.Errorf("%w\nfield types: %s", err, entity.TypeNames)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	res, err := entity.Add(abs, spec, force, time.Now())
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Added %s to %s\n", rest[0], abs)
+	for _, f := range res.Created {
+		fmt.Fprintln(out, "  created  "+f)
+	}
+	for _, f := range res.Modified {
+		fmt.Fprintln(out, "  updated  "+f)
+	}
+	for _, f := range res.Skipped {
+		fmt.Fprintln(out, "  kept     "+f)
+	}
+	if len(res.Manual) > 0 {
+		fmt.Fprintln(out, "\nThis project has no projgen markers; add these lines by hand:")
+		for _, m := range res.Manual {
+			fmt.Fprintln(out, "  "+m)
+		}
+	}
+	fmt.Fprintln(out, "\nNext steps:")
+	for _, f := range res.Created {
+		if strings.HasSuffix(f, ".up.sql") {
+			fmt.Fprintf(out, "  apply the migration: %s\n", f)
+		}
+	}
+	fmt.Fprintln(out, "  go test ./...")
 	return nil
 }
 

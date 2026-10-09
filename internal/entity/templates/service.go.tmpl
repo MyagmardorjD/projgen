@@ -1,0 +1,72 @@
+{{- $d := .P.domain.Name -}}
+package {{.P.service.Name}}
+
+import (
+	"context"
+	"fmt"
+
+	"{{.P.domain.Import}}"
+)
+
+const (
+	default{{.E.Name}}PageSize = 20
+	max{{.E.Name}}PageSize     = 100
+)
+
+// {{.E.Name}}Service holds the business rules for {{.E.Table}}.
+type {{.E.Name}}Service struct {
+	repo {{$d}}.{{.E.Name}}Repository
+}
+
+func New{{.E.Name}}Service(repo {{$d}}.{{.E.Name}}Repository) *{{.E.Name}}Service {
+	return &{{.E.Name}}Service{repo: repo}
+}
+
+// Create validates in and stores a new record.
+func (s *{{.E.Name}}Service) Create(ctx context.Context, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+	if err := in.Validate(); err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("%w: %w", {{$d}}.ErrValidation, err)
+	}
+	return s.repo.Create(ctx, in)
+}
+
+// Get returns one record or {{$d}}.ErrNotFound.
+func (s *{{.E.Name}}Service) Get(ctx context.Context, id int64) ({{$d}}.{{.E.Name}}, error) {
+	if id <= 0 {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+	return s.repo.Get(ctx, id)
+}
+
+// List returns one page ordered by id. limit defaults to 20 and is capped at 100.
+func (s *{{.E.Name}}Service) List(ctx context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+	if limit <= 0 {
+		limit = default{{.E.Name}}PageSize
+	}
+	if limit > max{{.E.Name}}PageSize {
+		limit = max{{.E.Name}}PageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.repo.List(ctx, limit, offset)
+}
+
+// Update validates in and replaces the record's fields.
+func (s *{{.E.Name}}Service) Update(ctx context.Context, id int64, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+	if err := in.Validate(); err != nil {
+		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("%w: %w", {{$d}}.ErrValidation, err)
+	}
+	if id <= 0 {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+	return s.repo.Update(ctx, id, in)
+}
+
+// Delete removes the record or returns {{$d}}.ErrNotFound.
+func (s *{{.E.Name}}Service) Delete(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return {{$d}}.ErrNotFound
+	}
+	return s.repo.Delete(ctx, id)
+}

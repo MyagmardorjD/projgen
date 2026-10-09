@@ -25,6 +25,7 @@ type Deps struct {
 	Greeter *{{.P.service.Name}}.Greeter
 	Health  HealthChecker
 	Logger  *slog.Logger
+	// projgen:deps (projgen add entity inserts fields here)
 }
 
 // NewRouter builds the Fiber app with all routes and middleware.
@@ -34,6 +35,7 @@ func NewRouter(d Deps) *fiber.App {
 	app.Get("/health", health(d))
 	v1 := app.Group("/api/v1")
 	v1.Get("/hello", hello(d))
+	// projgen:routes (projgen add entity inserts routes here)
 	return app
 }
 

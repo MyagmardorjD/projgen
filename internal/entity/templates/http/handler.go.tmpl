@@ -1,0 +1,359 @@
+{{- $d := .P.domain.Name -}}
+{{- $s := .P.service.Name -}}
+{{- $fw := .Opt.Framework -}}
+{{- $h := printf "%sHandler" .E.Var -}}
+package {{.P.http.Name}}
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+{{- if eq $fw "gin"}}
+
+	"github.com/gin-gonic/gin"
+{{- else if eq $fw "echo"}}
+
+	"github.com/labstack/echo/v4"
+{{- else if eq $fw "fiber"}}
+
+	"github.com/gofiber/fiber/v2"
+{{- end}}
+
+	"{{.P.domain.Import}}"
+	{{$s}} "{{.P.service.Import}}"
+)
+
+{{if eq $fw "gin" -}}
+// register{{.E.Name}}Routes adds the {{.E.Table}} CRUD routes under r.
+func register{{.E.Name}}Routes(r *gin.RouterGroup, s *{{$s}}.{{.E.Name}}Service, log *slog.Logger) {
+	if s == nil {
+		return
+	}
+	h := {{$h}}{s: s, log: log}
+	r.POST("/{{.E.Route}}", h.create)
+	r.GET("/{{.E.Route}}", h.list)
+	r.GET("/{{.E.Route}}/:id", h.get)
+	r.PUT("/{{.E.Route}}/:id", h.update)
+	r.DELETE("/{{.E.Route}}/:id", h.delete)
+}
+
+type {{$h}} struct {
+	s   *{{$s}}.{{.E.Name}}Service
+	log *slog.Logger
+}
+
+func (h {{$h}}) create(c *gin.Context) {
+	var in {{$d}}.{{.E.Name}}Input
+	if err := decodeBody(c.Writer, c.Request, &in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+	x, err := h.s.Create(c.Request.Context(), in)
+	if err != nil {
+		entityError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusCreated, x)
+}
+
+func (h {{$h}}) list(c *gin.Context) {
+	limit, offset := pageParams(c.Query("limit"), c.Query("offset"))
+	items, err := h.s.List(c.Request.Context(), limit, offset)
+	if err != nil {
+		entityError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, items)
+}
+
+func (h {{$h}}) get(c *gin.Context) {
+	id, ok := pathID(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	x, err := h.s.Get(c.Request.Context(), id)
+	if err != nil {
+		entityError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, x)
+}
+
+func (h {{$h}}) update(c *gin.Context) {
+	id, ok := pathID(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in {{$d}}.{{.E.Name}}Input
+	if err := decodeBody(c.Writer, c.Request, &in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+	x, err := h.s.Update(c.Request.Context(), id, in)
+	if err != nil {
+		entityError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, x)
+}
+
+func (h {{$h}}) delete(c *gin.Context) {
+	id, ok := pathID(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.s.Delete(c.Request.Context(), id); err != nil {
+		entityError(c, h.log, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+{{- else if eq $fw "echo" -}}
+// register{{.E.Name}}Routes adds the {{.E.Table}} CRUD routes under g.
+func register{{.E.Name}}Routes(g *echo.Group, s *{{$s}}.{{.E.Name}}Service, log *slog.Logger) {
+	if s == nil {
+		return
+	}
+	h := {{$h}}{s: s, log: log}
+	g.POST("/{{.E.Route}}", h.create)
+	g.GET("/{{.E.Route}}", h.list)
+	g.GET("/{{.E.Route}}/:id", h.get)
+	g.PUT("/{{.E.Route}}/:id", h.update)
+	g.DELETE("/{{.E.Route}}/:id", h.delete)
+}
+
+type {{$h}} struct {
+	s   *{{$s}}.{{.E.Name}}Service
+	log *slog.Logger
+}
+
+func (h {{$h}}) create(c echo.Context) error {
+	var in {{$d}}.{{.E.Name}}Input
+	if err := decodeBody(c.Response(), c.Request(), &in); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	}
+	x, err := h.s.Create(c.Request().Context(), in)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(http.StatusCreated, x)
+}
+
+func (h {{$h}}) list(c echo.Context) error {
+	limit, offset := pageParams(c.QueryParam("limit"), c.QueryParam("offset"))
+	items, err := h.s.List(c.Request().Context(), limit, offset)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(http.StatusOK, items)
+}
+
+func (h {{$h}}) get(c echo.Context) error {
+	id, ok := pathID(c.Param("id"))
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+	x, err := h.s.Get(c.Request().Context(), id)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(http.StatusOK, x)
+}
+
+func (h {{$h}}) update(c echo.Context) error {
+	id, ok := pathID(c.Param("id"))
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+	var in {{$d}}.{{.E.Name}}Input
+	if err := decodeBody(c.Response(), c.Request(), &in); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	}
+	x, err := h.s.Update(c.Request().Context(), id, in)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(http.StatusOK, x)
+}
+
+func (h {{$h}}) delete(c echo.Context) error {
+	id, ok := pathID(c.Param("id"))
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+	if err := h.s.Delete(c.Request().Context(), id); err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+{{- else if eq $fw "fiber" -}}
+// register{{.E.Name}}Routes adds the {{.E.Table}} CRUD routes under r.
+func register{{.E.Name}}Routes(r fiber.Router, s *{{$s}}.{{.E.Name}}Service, log *slog.Logger) {
+	if s == nil {
+		return
+	}
+	h := {{$h}}{s: s, log: log}
+	r.Post("/{{.E.Route}}", h.create)
+	r.Get("/{{.E.Route}}", h.list)
+	r.Get("/{{.E.Route}}/:id", h.get)
+	r.Put("/{{.E.Route}}/:id", h.update)
+	r.Delete("/{{.E.Route}}/:id", h.delete)
+}
+
+type {{$h}} struct {
+	s   *{{$s}}.{{.E.Name}}Service
+	log *slog.Logger
+}
+
+func (h {{$h}}) create(c *fiber.Ctx) error {
+	var in {{$d}}.{{.E.Name}}Input
+	if err := json.Unmarshal(c.Body(), &in); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON body"})
+	}
+	x, err := h.s.Create(c.UserContext(), in)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.Status(http.StatusCreated).JSON(x)
+}
+
+func (h {{$h}}) list(c *fiber.Ctx) error {
+	limit, offset := pageParams(c.Query("limit"), c.Query("offset"))
+	items, err := h.s.List(c.UserContext(), limit, offset)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(items)
+}
+
+func (h {{$h}}) get(c *fiber.Ctx) error {
+	id, ok := pathID(c.Params("id"))
+	if !ok {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+	}
+	x, err := h.s.Get(c.UserContext(), id)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(x)
+}
+
+func (h {{$h}}) update(c *fiber.Ctx) error {
+	id, ok := pathID(c.Params("id"))
+	if !ok {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+	}
+	var in {{$d}}.{{.E.Name}}Input
+	if err := json.Unmarshal(c.Body(), &in); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON body"})
+	}
+	x, err := h.s.Update(c.UserContext(), id, in)
+	if err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.JSON(x)
+}
+
+func (h {{$h}}) delete(c *fiber.Ctx) error {
+	id, ok := pathID(c.Params("id"))
+	if !ok {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+	}
+	if err := h.s.Delete(c.UserContext(), id); err != nil {
+		return entityError(c, h.log, err)
+	}
+	return c.SendStatus(http.StatusNoContent)
+}
+{{- else -}}
+// register{{.E.Name}}Routes adds the {{.E.Table}} CRUD routes to mux under prefix.
+func register{{.E.Name}}Routes(mux *http.ServeMux, prefix string, s *{{$s}}.{{.E.Name}}Service, log *slog.Logger) {
+	if s == nil {
+		return
+	}
+	h := {{$h}}{s: s, log: log}
+	mux.HandleFunc("POST "+prefix+"/{{.E.Route}}", h.create)
+	mux.HandleFunc("GET "+prefix+"/{{.E.Route}}", h.list)
+	mux.HandleFunc("GET "+prefix+"/{{.E.Route}}/{id}", h.get)
+	mux.HandleFunc("PUT "+prefix+"/{{.E.Route}}/{id}", h.update)
+	mux.HandleFunc("DELETE "+prefix+"/{{.E.Route}}/{id}", h.delete)
+}
+
+type {{$h}} struct {
+	s   *{{$s}}.{{.E.Name}}Service
+	log *slog.Logger
+}
+
+func (h {{$h}}) create(w http.ResponseWriter, r *http.Request) {
+	var in {{$d}}.{{.E.Name}}Input
+	if err := decodeBody(w, r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	x, err := h.s.Create(r.Context(), in)
+	if err != nil {
+		entityError(w, r, h.log, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, x)
+}
+
+func (h {{$h}}) list(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, offset := pageParams(q.Get("limit"), q.Get("offset"))
+	items, err := h.s.List(r.Context(), limit, offset)
+	if err != nil {
+		entityError(w, r, h.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h {{$h}}) get(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r.PathValue("id"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	x, err := h.s.Get(r.Context(), id)
+	if err != nil {
+		entityError(w, r, h.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, x)
+}
+
+func (h {{$h}}) update(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r.PathValue("id"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	var in {{$d}}.{{.E.Name}}Input
+	if err := decodeBody(w, r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	x, err := h.s.Update(r.Context(), id, in)
+	if err != nil {
+		entityError(w, r, h.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, x)
+}
+
+func (h {{$h}}) delete(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r.PathValue("id"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if err := h.s.Delete(r.Context(), id); err != nil {
+		entityError(w, r, h.log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+{{- end}}

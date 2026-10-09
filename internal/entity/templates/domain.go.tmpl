@@ -1,0 +1,53 @@
+package {{.P.domain.Name}}
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+// {{.E.Name}} is stored in the {{.E.Table}} table.
+type {{.E.Name}} struct {
+	ID int64 `json:"id"`
+{{- range .Fields}}
+	{{.Go}} {{.GoType}} `json:"{{.JSON}}"`
+{{- end}}
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// {{.E.Name}}Input holds the fields a client sets on create and update.
+type {{.E.Name}}Input struct {
+{{- range .Fields}}
+	{{.Go}} {{.GoType}} `json:"{{.JSON}}"`
+{{- end}}
+}
+
+// Validate reports every invalid field.
+func (in {{.E.Name}}Input) Validate() error {
+	var errs []error
+{{- range .Fields}}
+{{- if .Required}}
+	if strings.TrimSpace(in.{{.Go}}) == "" {
+		errs = append(errs, errors.New("{{.JSON}} is required"))
+	}
+{{- end}}
+{{- if eq .Type "string"}}
+	if utf8.RuneCountInString(in.{{.Go}}) > 255 {
+		errs = append(errs, errors.New("{{.JSON}} must be at most 255 characters"))
+	}
+{{- end}}
+{{- end}}
+	return errors.Join(errs...)
+}
+
+// {{.E.Name}}Repository stores {{.E.Name}} records.
+type {{.E.Name}}Repository interface {
+	Create(ctx context.Context, in {{.E.Name}}Input) ({{.E.Name}}, error)
+	Get(ctx context.Context, id int64) ({{.E.Name}}, error)
+	List(ctx context.Context, limit, offset int) ([]{{.E.Name}}, error)
+	Update(ctx context.Context, id int64, in {{.E.Name}}Input) ({{.E.Name}}, error)
+	Delete(ctx context.Context, id int64) error
+}

@@ -1,0 +1,82 @@
+{{- $d := .P.domain.Name -}}
+package {{.P.db.Name}}
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"{{.P.domain.Import}}"
+)
+
+// {{.E.Name}}Repository keeps {{.E.Name}} records in memory. The project has
+// no database; data is lost on restart. Replace it with a real store later.
+type {{.E.Name}}Repository struct {
+	mu    sync.Mutex
+	items map[int64]{{$d}}.{{.E.Name}}
+	next  int64
+}
+
+func New{{.E.Name}}Repository() *{{.E.Name}}Repository {
+	return &{{.E.Name}}Repository{items: map[int64]{{$d}}.{{.E.Name}}{}}
+}
+
+func (r *{{.E.Name}}Repository) Create(_ context.Context, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.next++
+	now := time.Now().UTC()
+	x := {{$d}}.{{.E.Name}}{ID: r.next, CreatedAt: now, UpdatedAt: now{{range .Fields}}, {{.Go}}: in.{{.Go}}{{end}}}
+	r.items[x.ID] = x
+	return x, nil
+}
+
+func (r *{{.E.Name}}Repository) Get(_ context.Context, id int64) ({{$d}}.{{.E.Name}}, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	x, ok := r.items[id]
+	if !ok {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+	return x, nil
+}
+
+func (r *{{.E.Name}}Repository) List(_ context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []{{$d}}.{{.E.Name}}{}
+	for id := int64(1); id <= r.next && len(out) < offset+limit; id++ {
+		if x, ok := r.items[id]; ok {
+			out = append(out, x)
+		}
+	}
+	if offset >= len(out) {
+		return []{{$d}}.{{.E.Name}}{}, nil
+	}
+	return out[offset:], nil
+}
+
+func (r *{{.E.Name}}Repository) Update(_ context.Context, id int64, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	x, ok := r.items[id]
+	if !ok {
+		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
+	}
+{{- range .Fields}}
+	x.{{.Go}} = in.{{.Go}}
+{{- end}}
+	x.UpdatedAt = time.Now().UTC()
+	r.items[id] = x
+	return x, nil
+}
+
+func (r *{{.E.Name}}Repository) Delete(_ context.Context, id int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[id]; !ok {
+		return {{$d}}.ErrNotFound
+	}
+	delete(r.items, id)
+	return nil
+}

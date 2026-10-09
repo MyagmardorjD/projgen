@@ -24,6 +24,7 @@ type Deps struct {
 	Greeter *{{.P.service.Name}}.Greeter
 	Health  HealthChecker
 	Logger  *slog.Logger
+	// projgen:deps (projgen add entity inserts fields here)
 }
 
 // NewRouter builds the HTTP handler with all routes and middleware.
@@ -31,6 +32,7 @@ func NewRouter(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health(d))
 	mux.HandleFunc("GET /api/v1/hello", hello(d))
+	// projgen:routes (projgen add entity inserts routes here)
 	return requestLogger(d.Logger, recoverer(d.Logger, mux))
 }
 
