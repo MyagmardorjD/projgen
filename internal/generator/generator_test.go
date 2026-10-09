@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -114,8 +115,19 @@ func TestRender_AllCombinations(t *testing.T) {
 				"Dockerfile", "docker-compose.yml", ".gitlab-ci.yml", ".github/workflows/ci.yml", "docs/openapi.yaml",
 			}
 			if o.Database != "none" {
-				want = append(want, d.P["db"].Dir+"/db.go", d.P["db"].Dir+"/migrate.go",
-					"migrations/migrations.go", "migrations/"+d.Stamp+"_init.up.sql")
+				want = append(want, d.P["db"].Dir+"/db.go", d.P["db"].Dir+"/migrate.go", "migrations/migrations.go")
+				// The first migration is named after the generation time, which
+				// Render reads itself; match the shape, not this test's clock.
+				initRe := regexp.MustCompile(`^migrations/\d{14}_init\.(up|down)\.sql$`)
+				n := 0
+				for p := range files {
+					if initRe.MatchString(p) {
+						n++
+					}
+				}
+				if n != 2 {
+					t.Errorf("found %d init migration files, want up and down", n)
+				}
 				if !strings.Contains(string(files["cmd/server/main.go"]), ".Migrate(cfg.DatabaseURL)") {
 					t.Error("main.go does not run migrations")
 				}
