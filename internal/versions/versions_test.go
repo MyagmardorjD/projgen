@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -146,5 +147,29 @@ func TestSaveLoad(t *testing.T) {
 	got, cached := Load()
 	if !cached || got.Go != "1.99" {
 		t.Errorf("Load = %q, cached %v; want 1.99 from cache", got.Go, cached)
+	}
+}
+
+func TestFetch_GitHubTokenOnlySentToGitHub(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var mu sync.Mutex
+	auth := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		auth[strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)[0]] = r.Header.Get("Authorization")
+		mu.Unlock()
+		http.Error(w, "nothing here", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	f := &Fetcher{Client: srv.Client(), GoDL: srv.URL + "/dl", Proxy: srv.URL + "/proxy", DockerHub: srv.URL + "/hub", GitHub: srv.URL + "/gh"}
+	_, _ = f.Fetch(context.Background())
+
+	if auth["gh"] != "Bearer test-token" {
+		t.Errorf("GitHub request auth = %q, want the token", auth["gh"])
+	}
+	for _, src := range []string{"dl", "proxy", "hub"} {
+		if auth[src] != "" {
+			t.Errorf("token leaked to %s", src)
+		}
 	}
 }

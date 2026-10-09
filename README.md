@@ -1,5 +1,8 @@
 # projgen
 
+[![ci](https://github.com/MyagmardorjD/projgen/actions/workflows/ci.yml/badge.svg)](https://github.com/MyagmardorjD/projgen/actions/workflows/ci.yml)
+[![e2e](https://github.com/MyagmardorjD/projgen/actions/workflows/e2e.yml/badge.svg)](https://github.com/MyagmardorjD/projgen/actions/workflows/e2e.yml)
+
 Хөгжүүлэгчийн сонгосон технологиор (хэл, framework, архитектур, өгөгдлийн сан) шууд ажилладаг төслийн суурийг үүсгэдэг хэрэгсэл. Вэб интерфейс болон CLI-тэй. Хувилбар 1 нь Go-г дэмжинэ.
 
 ## Суулгах
@@ -82,4 +85,12 @@ go test ./...                          # хурдан тестүүд
 PROJGEN_E2E=1 go test ./internal/generator -run BuildAndTest -timeout 30m
 ```
 
-Сүүлийнх нь 36 хослол бүрийг үүсгээд `go mod tidy`, `go vet`, `go test` ажиллуулна (интернэт хэрэгтэй).
+Сүүлийнх нь 36 хослол бүрийг үүсгээд `go mod tidy`, `go vet`, `go test` ажиллуулна (интернэт хэрэгтэй). `PROJGEN_E2E_LATEST=1` нэмбэл binary-д суулгасан биш, албан ёсны эх сурвалжийн хамгийн сүүлийн хувилбаруудаар шалгана.
+
+### CI (GitHub Actions)
+
+| Workflow | Хэзээ | Юу хийдэг |
+| --- | --- | --- |
+| `ci.yml` | push, PR бүрт | gofmt, go vet, go test (Ubuntu + Windows), race detector |
+| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг хамгийн сүүлийн хувилбараар шалгана. Эвдэрвэл issue нээнэ |
+| Dependabot | 7 хоног бүр | projgen-ий Go dependency, Actions-ийн хувилбарыг шинэчлэх PR |

@@ -1,0 +1,62 @@
+# Generates every framework x architecture x database combination with the
+# latest versions from the official sources, then runs go mod tidy, go vet
+# and go test on each. Catches a new release that breaks the templates
+# before developers hit it, and opens an issue when that happens.
+name: e2e
+
+on:
+  schedule:
+    - cron: "0 1 * * 1" # Mondays 01:00 UTC (09:00 Ulaanbaatar)
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "internal/generator/**"
+      - "internal/versions/**"
+      - ".github/workflows/e2e.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: e2e
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build and test generated projects (latest versions)
+        env:
+          PROJGEN_E2E: "1"
+          PROJGEN_E2E_LATEST: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go test -count=1 -run TestGenerated_BuildAndTest -timeout 40m -v ./internal/generator 2>&1 | tee e2e.log
+
+      - name: Open an issue on failure
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="E2E: generated projects fail with the latest versions"
+          open="$(gh issue list --state open --search "\"$title\" in:title" --json number --jq length)"
+          if [ "$open" != "0" ]; then
+            echo "An issue is already open; not creating another."
+            exit 0
+          fi
+          {
+            echo "The weekly E2E run failed: $RUN_URL"
+            echo
+            echo '```'
+            grep -E -- 'versions:|--- FAIL|^FAIL|go (mod|vet|test)' e2e.log | head -60 || true
+            echo '```'
+          } > body.md
+          gh issue create --title "$title" --body-file body.md

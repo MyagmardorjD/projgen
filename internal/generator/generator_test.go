@@ -1,12 +1,14 @@
 package generator
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -212,14 +214,30 @@ func TestGenerate_NonEmptyDir(t *testing.T) {
 // TestGenerated_BuildAndTest generates every combination, downloads
 // dependencies and runs go vet + go test on the result. It needs network
 // access and takes minutes, so it runs only with PROJGEN_E2E=1.
+//
+// With PROJGEN_E2E_LATEST=1 it first fetches the latest versions from the
+// official sources, so a new release that breaks the templates is caught
+// before developers hit it. Any source that cannot be reached fails the test.
 func TestGenerated_BuildAndTest(t *testing.T) {
 	if os.Getenv("PROJGEN_E2E") != "1" {
 		t.Skip("set PROJGEN_E2E=1 to build and test generated projects")
 	}
+	v := testV
+	if os.Getenv("PROJGEN_E2E_LATEST") == "1" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		got, err := versions.NewFetcher().Fetch(ctx)
+		if err != nil {
+			t.Fatalf("fetching latest versions: %v", err)
+		}
+		v = versions.Merge(testV, got)
+	}
+	t.Logf("versions: go %s, modules %v, images %v, actions %v", v.Go, v.Modules, v.Images, v.Actions)
+
 	for _, o := range combos() {
 		t.Run(name(o), func(t *testing.T) {
 			dir := t.TempDir()
-			if _, err := Generate(o, testV, dir, Flags{}); err != nil {
+			if _, err := Generate(o, v, dir, Flags{}); err != nil {
 				t.Fatal(err)
 			}
 			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {

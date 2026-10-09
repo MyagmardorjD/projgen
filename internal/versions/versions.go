@@ -210,6 +210,11 @@ func (f *Fetcher) getJSON(ctx context.Context, url string, out any) error {
 		return err
 	}
 	req.Header.Set("User-Agent", "projgen")
+	// In CI the anonymous GitHub API limit (60/hour per IP) is shared by many
+	// jobs; use the workflow token when one is provided. Sent to GitHub only.
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" && f.GitHub != "" && strings.HasPrefix(url, f.GitHub+"/") {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	resp, err := f.Client.Do(req)
 	if err != nil {
 		return err
