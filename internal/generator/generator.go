@@ -19,13 +19,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/MyagmardorjD/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/versions"
 )
 
 //go:embed all:templates
 var templateFS embed.FS
-
-// GoVersion is the go directive written to generated go.mod files.
-const GoVersion = "1.24"
 
 // ErrDirNotEmpty is returned when the target exists, is not empty and Force is off.
 var ErrDirNotEmpty = errors.New("target directory is not empty")
@@ -52,20 +50,35 @@ type Pkg struct {
 // DB holds database-specific values used by templates.
 type DB struct {
 	Driver     string // database/sql driver name
+	Module     string // driver module path
 	Import     string // driver import path
-	Image      string // docker image
+	Image      string // docker image name; the tag comes from versions
 	Port       string
 	LocalURL   string // DSN for running the app on the host
 	ComposeURL string // DSN inside docker-compose
 }
 
+// Require is one line of the generated go.mod require block.
+type Require struct {
+	Path    string
+	Version string
+}
+
 // Data is passed to every template.
 type Data struct {
-	Opt       options.Options
-	P         map[string]Pkg
-	HasDB     bool
-	DB        DB
-	GoVersion string
+	Opt      options.Options
+	P        map[string]Pkg
+	HasDB    bool
+	DB       DB
+	V        versions.Versions
+	Requires []Require
+}
+
+// frameworkModules maps a framework to the Go module it needs.
+var frameworkModules = map[string]string{
+	"gin":   versions.Gin,
+	"echo":  versions.Echo,
+	"fiber": versions.Fiber,
 }
 
 type file struct {
@@ -104,24 +117,26 @@ var layouts = map[string]map[string][2]string{
 var databases = map[string]DB{
 	"postgresql": {
 		Driver:     "pgx",
-		Import:     "github.com/jackc/pgx/v5/stdlib",
-		Image:      "postgres:17-alpine",
+		Module:     versions.Pgx,
+		Import:     versions.Pgx + "/stdlib",
+		Image:      "postgres",
 		Port:       "5432",
 		LocalURL:   "postgres://app:app@localhost:5432/app?sslmode=disable",
 		ComposeURL: "postgres://${DB_USER:-app}:${DB_PASSWORD:-app}@db:5432/${DB_NAME:-app}?sslmode=disable",
 	},
 	"mysql": {
 		Driver:     "mysql",
-		Import:     "github.com/go-sql-driver/mysql",
-		Image:      "mysql:8.4",
+		Module:     versions.MySQL,
+		Import:     versions.MySQL,
+		Image:      "mysql",
 		Port:       "3306",
 		LocalURL:   "app:app@tcp(localhost:3306)/app?parseTime=true",
 		ComposeURL: "${DB_USER:-app}:${DB_PASSWORD:-app}@tcp(db:3306)/${DB_NAME:-app}?parseTime=true",
 	},
 }
 
-// NewData builds template data for valid options.
-func NewData(o options.Options) Data {
+// NewData builds template data for valid options and the given versions.
+func NewData(o options.Options, v versions.Versions) Data {
 	dbShort := map[string]string{"postgresql": "postgres", "mysql": "mysql"}[o.Database]
 	p := map[string]Pkg{}
 	for comp, v := range layouts[o.Architecture] {
@@ -129,7 +144,15 @@ func NewData(o options.Options) Data {
 		name := strings.ReplaceAll(v[1], "{db}", dbShort)
 		p[comp] = Pkg{Dir: dir, Name: name, Import: o.Module + "/" + dir}
 	}
-	return Data{Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], GoVersion: GoVersion}
+	d := Data{Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], V: v}
+	if m, ok := frameworkModules[o.Framework]; ok {
+		d.Requires = append(d.Requires, Require{m, v.Modules[m]})
+	}
+	if d.HasDB {
+		d.DB.Image += ":" + v.Images[d.DB.Image]
+		d.Requires = append(d.Requires, Require{d.DB.Module, v.Modules[d.DB.Module]})
+	}
+	return d
 }
 
 func plan(d Data) []file {
@@ -167,13 +190,14 @@ func plan(d Data) []file {
 	return files
 }
 
-// Render validates the options and renders every file in memory.
-// Keys are slash-separated paths relative to the project root.
-func Render(o options.Options) (map[string][]byte, error) {
+// Render validates the options and renders every file in memory using the
+// given technology versions. Keys are slash-separated paths relative to the
+// project root.
+func Render(o options.Options, v versions.Versions) (map[string][]byte, error) {
 	if err := o.Validate(); err != nil {
 		return nil, err
 	}
-	d := NewData(o)
+	d := NewData(o, v)
 	out := map[string][]byte{}
 	for _, f := range plan(d) {
 		b, err := renderOne(f.tmpl, d)
@@ -211,9 +235,9 @@ func renderOne(name string, d Data) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Generate renders the project and writes it to dir.
-func Generate(o options.Options, dir string, fl Flags) (Result, error) {
-	files, err := Render(o)
+// Generate renders the project with the given versions and writes it to dir.
+func Generate(o options.Options, v versions.Versions, dir string, fl Flags) (Result, error) {
+	files, err := Render(o, v)
 	if err != nil {
 		return Result{}, err
 	}

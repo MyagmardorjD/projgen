@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/MyagmardorjD/projgen/internal/versions"
 )
 
 const testConfig = `name: demo-api
@@ -16,44 +21,118 @@ architecture: layered
 database: none
 `
 
-func TestNew_PrintsAbsoluteLocation(t *testing.T) {
-	tmp := t.TempDir()
-	cfg := filepath.Join(tmp, "project.yaml")
-	if err := os.WriteFile(cfg, []byte(testConfig), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(tmp)
+// fakeHome points the user's home and config directories at a temp dir and
+// makes every official source unreachable, so tests never touch the real
+// machine or the network. It returns the fake home.
+func fakeHome(t *testing.T) string {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close() // every request now fails to connect
+	old := newFetcher
+	newFetcher = func() *versions.Fetcher {
+		return &versions.Fetcher{Client: &http.Client{Timeout: time.Second}, GoDL: srv.URL, Proxy: srv.URL, DockerHub: srv.URL, GitHub: srv.URL}
+	}
+	t.Cleanup(func() { newFetcher = old })
+	return home
+}
+
+func TestNew_UnreachableSourcesFallBackToSavedVersions(t *testing.T) {
+	home := fakeHome(t)
 	var out bytes.Buffer
-	if err := run([]string{"new", "--config", cfg, "--skip-tidy", "--no-git"}, strings.NewReader(""), &out); err != nil {
+	if err := run([]string{"new", "--config", writeConfig(t), "--skip-tidy", "--no-git"}, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
 	}
-
-	want, err := filepath.Abs("demo-api")
+	if !strings.Contains(out.String(), "warning: some versions could not be checked") {
+		t.Errorf("no warning about unreachable sources:\n%s", out.String())
+	}
+	gomod, err := os.ReadFile(filepath.Join(home, "source", "repos", "demo-api", "go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	want := versions.Gin + " " + versions.Defaults().Modules[versions.Gin]
+	if !strings.Contains(string(gomod), want) {
+		t.Errorf("go.mod does not use built-in %s:\n%s", want, gomod)
+	}
+}
+
+func TestNew_OfflineSkipsCheck(t *testing.T) {
+	fakeHome(t)
+	var out bytes.Buffer
+	if err := run([]string{"new", "--config", writeConfig(t), "--offline", "--dry-run"}, strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "Checking latest versions") {
+		t.Errorf("--offline still checked sources:\n%s", out.String())
+	}
+}
+
+func TestVersionsCommand(t *testing.T) {
+	fakeHome(t)
+	var out bytes.Buffer
+	if err := run([]string{"versions"}, strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Built-in versions", "Go", versions.Gin, "postgres", "actions/checkout"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("versions output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func writeConfig(t *testing.T) string {
+	cfg := filepath.Join(t.TempDir(), "project.yaml")
+	if err := os.WriteFile(cfg, []byte(testConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestNew_DefaultsToSourceRepos(t *testing.T) {
+	home := fakeHome(t)
+	var out bytes.Buffer
+	if err := run([]string{"new", "--config", writeConfig(t), "--skip-tidy", "--no-git"}, strings.NewReader(""), &out); err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+
+	want := filepath.Join(home, "source", "repos", "demo-api")
 	if !strings.Contains(out.String(), "Project location: "+want) {
-		t.Errorf("output does not show absolute location %s:\n%s", want, out.String())
+		t.Errorf("output does not show %s:\n%s", want, out.String())
 	}
 	if _, err := os.Stat(filepath.Join(want, "go.mod")); err != nil {
 		t.Errorf("project not created at %s: %v", want, err)
 	}
 }
 
-func TestNew_DryRunShowsAbsoluteLocation(t *testing.T) {
-	tmp := t.TempDir()
-	cfg := filepath.Join(tmp, "project.yaml")
-	if err := os.WriteFile(cfg, []byte(testConfig), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(tmp)
-
+func TestNew_InteractiveAsksLocation(t *testing.T) {
+	fakeHome(t)
+	parent := t.TempDir()
+	// name, module, location, then defaults for the stack, no extras, confirm.
+	input := "demo-api\n\n" + parent + "\n\n\n\n3\n\ny\n"
 	var out bytes.Buffer
-	if err := run([]string{"new", "--config", cfg, "--dry-run"}, strings.NewReader(""), &out); err != nil {
+	if err := run([]string{"new", "--skip-tidy", "--no-git"}, strings.NewReader(input), &out); err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+	want := filepath.Join(parent, "demo-api")
+	if !strings.Contains(out.String(), "Project location: "+want) {
+		t.Errorf("output does not show %s:\n%s", want, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(want, "go.mod")); err != nil {
+		t.Errorf("project not created at %s: %v", want, err)
+	}
+}
+
+func TestNew_OutOverridesDefault(t *testing.T) {
+	fakeHome(t)
+	want := filepath.Join(t.TempDir(), "custom")
+	var out bytes.Buffer
+	if err := run([]string{"new", "--config", writeConfig(t), "--out", want, "--dry-run"}, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	want, _ := filepath.Abs("demo-api")
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("dry run output does not show %s:\n%s", want, out.String())
 	}

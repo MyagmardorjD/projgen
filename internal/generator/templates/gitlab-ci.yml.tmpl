@@ -4,7 +4,7 @@ stages:
 
 test:
   stage: test
-  image: golang:{{.GoVersion}}
+  image: golang:{{.V.Go}}
   script:
     - test -z "$(gofmt -l .)"
     - go vet ./...
@@ -13,7 +13,7 @@ test:
 
 build:
   stage: build
-  image: golang:{{.GoVersion}}
+  image: golang:{{.V.Go}}
   script:
     - CGO_ENABLED=0 go build -o bin/{{.Opt.Name}} ./cmd/server
   artifacts:

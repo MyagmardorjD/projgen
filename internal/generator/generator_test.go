@@ -11,7 +11,52 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/MyagmardorjD/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/versions"
 )
+
+var testV = versions.Defaults()
+
+// Versions from the official sources must end up in the generated files.
+func TestRender_UsesVersions(t *testing.T) {
+	v := versions.Defaults()
+	v.Go = "1.99"
+	v.Modules[versions.Echo] = "v4.99.0"
+	v.Modules[versions.Pgx] = "v5.99.0"
+	v.Images["postgres"] = "99-alpine"
+	v.Actions["actions/checkout"] = "v99"
+
+	files, err := Render(opts("echo", "clean", "postgresql", allExtras...), v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := map[string][]string{
+		"go.mod":                   {"go 1.99", versions.Echo + " v4.99.0", versions.Pgx + " v5.99.0"},
+		"Dockerfile":               {"golang:1.99-alpine"},
+		".gitlab-ci.yml":           {"golang:1.99"},
+		"docker-compose.yml":       {"image: postgres:99-alpine"},
+		".github/workflows/ci.yml": {"actions/checkout@v99"},
+	}
+	for file, wants := range checks {
+		for _, w := range wants {
+			if !strings.Contains(string(files[file]), w) {
+				t.Errorf("%s does not contain %q:\n%s", file, w, files[file])
+			}
+		}
+	}
+	if strings.Contains(string(files["go.mod"]), versions.Gin) {
+		t.Error("go.mod requires gin although echo was chosen")
+	}
+}
+
+func TestRender_NetHTTPNoDBHasNoRequires(t *testing.T) {
+	files, err := Render(opts("nethttp", "layered", "none"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(files["go.mod"]), "require") {
+		t.Errorf("go.mod should have no requires:\n%s", files["go.mod"])
+	}
+}
 
 func opts(fw, arch, db string, extras ...string) options.Options {
 	return options.Options{
@@ -46,11 +91,11 @@ func name(o options.Options) string { return o.Framework + "-" + o.Architecture 
 func TestRender_AllCombinations(t *testing.T) {
 	for _, o := range combos() {
 		t.Run(name(o), func(t *testing.T) {
-			files, err := Render(o)
+			files, err := Render(o, testV)
 			if err != nil {
 				t.Fatalf("render: %v", err)
 			}
-			d := NewData(o)
+			d := NewData(o, testV)
 			want := []string{
 				"go.mod", "cmd/server/main.go", "README.md", "Makefile", ".gitignore", ".env.example", "project.yaml",
 				d.P["http"].Dir + "/router.go", d.P["http"].Dir + "/router_test.go",
@@ -82,7 +127,7 @@ func TestRender_AllCombinations(t *testing.T) {
 }
 
 func TestRender_ExtrasOnlyWhenChosen(t *testing.T) {
-	files, err := Render(opts("gin", "layered", "none"))
+	files, err := Render(opts("gin", "layered", "none"), testV)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,14 +139,14 @@ func TestRender_ExtrasOnlyWhenChosen(t *testing.T) {
 }
 
 func TestRender_InvalidOptions(t *testing.T) {
-	if _, err := Render(opts("spring-boot", "clean", "postgresql")); err == nil {
+	if _, err := Render(opts("spring-boot", "clean", "postgresql"), testV); err == nil {
 		t.Fatal("expected validation error")
 	}
 }
 
 func TestRender_ProjectYAMLRoundTrip(t *testing.T) {
 	o := opts("echo", "hexagonal", "mysql", "docker")
-	files, err := Render(o)
+	files, err := Render(o, testV)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +161,7 @@ func TestRender_ProjectYAMLRoundTrip(t *testing.T) {
 
 func TestGenerate_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
-	res, err := Generate(opts("nethttp", "clean", "postgresql"), dir, Flags{})
+	res, err := Generate(opts("nethttp", "clean", "postgresql"), testV, dir, Flags{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +174,7 @@ func TestGenerate_WritesFiles(t *testing.T) {
 
 func TestGenerate_DryRunWritesNothing(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "new")
-	res, err := Generate(opts("gin", "layered", "none"), dir, Flags{DryRun: true})
+	res, err := Generate(opts("gin", "layered", "none"), testV, dir, Flags{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +193,7 @@ func TestGenerate_NonEmptyDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Generate(opts("gin", "layered", "none"), dir, Flags{})
+	_, err := Generate(opts("gin", "layered", "none"), testV, dir, Flags{})
 	if !errors.Is(err, ErrDirNotEmpty) {
 		t.Fatalf("err = %v, want ErrDirNotEmpty", err)
 	}
@@ -156,7 +201,7 @@ func TestGenerate_NonEmptyDir(t *testing.T) {
 		t.Error("files written despite refusal")
 	}
 
-	if _, err := Generate(opts("gin", "layered", "none"), dir, Flags{Force: true}); err != nil {
+	if _, err := Generate(opts("gin", "layered", "none"), testV, dir, Flags{Force: true}); err != nil {
 		t.Fatalf("force: %v", err)
 	}
 	if b, _ := os.ReadFile(keep); string(b) != "mine" {
@@ -174,7 +219,7 @@ func TestGenerated_BuildAndTest(t *testing.T) {
 	for _, o := range combos() {
 		t.Run(name(o), func(t *testing.T) {
 			dir := t.TempDir()
-			if _, err := Generate(o, dir, Flags{}); err != nil {
+			if _, err := Generate(o, testV, dir, Flags{}); err != nil {
 				t.Fatal(err)
 			}
 			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {

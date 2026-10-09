@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -26,16 +28,63 @@ func New(in io.Reader, out io.Writer) *Prompter {
 }
 
 // Ask walks through every option, shows a summary and asks to confirm.
-func (p *Prompter) Ask() (options.Options, error) {
+// It returns the options and the project directory. When fixedDir is set
+// (from --out) the location question is skipped; otherwise the developer
+// picks a parent folder, defaulting to defaultParent, and the project goes
+// in <parent>/<name>.
+func (p *Prompter) Ask(fixedDir, defaultParent string) (options.Options, string, error) {
 	var o options.Options
 	var err error
 
 	if o.Name, err = p.text("Project name", "my-service"); err != nil {
-		return o, err
+		return o, "", err
 	}
 	if o.Module, err = p.text("Go module path", "github.com/MyagmardorjD/"+o.Name); err != nil {
-		return o, err
+		return o, "", err
 	}
+	dir := fixedDir
+	if dir == "" {
+		parent, err := p.text("Create in folder", defaultParent)
+		if err != nil {
+			return o, "", err
+		}
+		dir = filepath.Join(ExpandHome(parent), o.Name)
+	}
+	if dir, err = filepath.Abs(dir); err != nil {
+		return o, "", err
+	}
+	o, err = p.askStack(o)
+	if err != nil {
+		return o, "", err
+	}
+
+	fmt.Fprintf(p.out, "\nSummary\n  name:         %s\n  module:       %s\n  location:     %s\n  language:     %s\n  framework:    %s\n  architecture: %s\n  database:     %s\n  extras:       %s\n",
+		o.Name, o.Module, dir, o.Language, o.Framework, o.Architecture, o.Database, strings.Join(o.Extras, ", "))
+	ok, err := p.text("Create project? (y/n)", "y")
+	if err != nil {
+		return o, "", err
+	}
+	if !strings.EqualFold(ok, "y") && !strings.EqualFold(ok, "yes") {
+		return o, "", ErrCancelled
+	}
+	return o, dir, nil
+}
+
+// ExpandHome replaces a leading "~" with the user's home directory.
+func ExpandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[1:])
+}
+
+// askStack asks for the technology choices and validates them.
+func (p *Prompter) askStack(o options.Options) (options.Options, error) {
+	var err error
 	if o.Language, err = p.choice("Language", options.Languages); err != nil {
 		return o, err
 	}
@@ -51,20 +100,7 @@ func (p *Prompter) Ask() (options.Options, error) {
 	if o.Extras, err = p.multi("Extras", options.Extras); err != nil {
 		return o, err
 	}
-	if err := o.Validate(); err != nil {
-		return o, err
-	}
-
-	fmt.Fprintf(p.out, "\nSummary\n  name:         %s\n  module:       %s\n  language:     %s\n  framework:    %s\n  architecture: %s\n  database:     %s\n  extras:       %s\n",
-		o.Name, o.Module, o.Language, o.Framework, o.Architecture, o.Database, strings.Join(o.Extras, ", "))
-	ok, err := p.text("Create project? (y/n)", "y")
-	if err != nil {
-		return o, err
-	}
-	if !strings.EqualFold(ok, "y") && !strings.EqualFold(ok, "yes") {
-		return o, ErrCancelled
-	}
-	return o, nil
+	return o, o.Validate()
 }
 
 func (p *Prompter) line() (string, error) {
