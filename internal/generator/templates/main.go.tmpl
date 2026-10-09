@@ -1,0 +1,59 @@
+// Command server starts the {{.Opt.Name}} HTTP API.
+package main
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"{{.P.config.Import}}"
+{{- if .HasDB}}
+	{{.P.db.Name}} "{{.P.db.Import}}"
+{{- end}}
+	{{.P.http.Name}} "{{.P.http.Import}}"
+	"{{.P.logger.Import}}"
+	{{.P.service.Name}} "{{.P.service.Import}}"
+)
+
+func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		logger.System(logger.New("{{.Opt.Name}}", "unknown", "INFO")).Error("config load failed", "error", err)
+		return err
+	}
+	log := logger.New(cfg.ServiceName, cfg.Env, cfg.LogLevel)
+	sys := logger.System(log)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	deps := {{.P.http.Name}}.Deps{
+		Greeter: {{.P.service.Name}}.NewGreeter(),
+		Logger:  log,
+	}
+{{- if .HasDB}}
+
+	conn, err := {{.P.db.Name}}.Open(cfg.DatabaseURL)
+	if err != nil {
+		sys.Error("database open failed", "error", err)
+		return err
+	}
+	defer conn.Close()
+	deps.Health = conn
+{{- end}}
+
+	sys.Info("server starting", "port", cfg.Port)
+	if err := {{.P.http.Name}}.Serve(ctx, ":"+cfg.Port, deps); err != nil {
+		sys.Error("server stopped with error", "error", err)
+		return err
+	}
+	sys.Info("server stopped")
+	return nil
+}

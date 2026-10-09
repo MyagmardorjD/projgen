@@ -1,0 +1,63 @@
+openapi: 3.0.3
+info:
+  title: {{.Opt.Name}}
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Liveness and dependency check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "503":
+          description: A dependency is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+  /api/v1/hello:
+    get:
+      summary: Example endpoint returning a greeting
+      parameters:
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        "200":
+          description: Greeting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Greeting"
+        "400":
+          description: Name too long
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    Status:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+    Greeting:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Hello, World!
+    Error:
+      type: object
+      properties:
+        error:
+          type: string

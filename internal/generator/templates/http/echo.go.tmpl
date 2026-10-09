@@ -1,0 +1,105 @@
+// Package {{.P.http.Name}} exposes the service over HTTP using Echo.
+package {{.P.http.Name}}
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+
+	"{{.P.domain.Import}}"
+	"{{.P.logger.Import}}"
+	{{.P.service.Name}} "{{.P.service.Import}}"
+)
+
+// HealthChecker is implemented by *sql.DB and anything else /health should ping.
+type HealthChecker interface {
+	PingContext(ctx context.Context) error
+}
+
+// Deps are the dependencies of the HTTP layer. Health may be nil.
+type Deps struct {
+	Greeter *{{.P.service.Name}}.Greeter
+	Health  HealthChecker
+	Logger  *slog.Logger
+}
+
+// NewRouter builds the HTTP handler with all routes and middleware.
+func NewRouter(d Deps) http.Handler {
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.Use(middleware.Recover(), requestLogger(d.Logger))
+	e.GET("/health", health(d))
+	v1 := e.Group("/api/v1")
+	v1.GET("/hello", hello(d))
+	return e
+}
+
+// Serve runs the server until ctx is cancelled, then shuts down gracefully.
+func Serve(ctx context.Context, addr string, d Deps) error {
+	srv := &http.Server{Addr: addr, Handler: NewRouter(d), ReadHeaderTimeout: 5 * time.Second}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
+}
+
+func requestLogger(base *slog.Logger) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			start := time.Now()
+			req := c.Request()
+			id := logger.RequestIDFrom(req.Header.Get("X-Request-ID"))
+			c.Response().Header().Set("X-Request-ID", id)
+			c.SetRequest(req.WithContext(logger.WithRequestID(req.Context(), id)))
+			if err := next(c); err != nil {
+				c.Error(err)
+			}
+			logger.FromContext(c.Request().Context(), base).Info("request completed",
+				"method", req.Method,
+				"path", c.Path(),
+				"status", c.Response().Status,
+				"duration_ms", time.Since(start).Milliseconds())
+			return nil
+		}
+	}
+}
+
+func health(d Deps) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if d.Health != nil {
+			ctx, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+			defer cancel()
+			if err := d.Health.PingContext(ctx); err != nil {
+				logger.FromContext(ctx, d.Logger).Error("health check failed", "error", err)
+				return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+			}
+		}
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+func hello(d Deps) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		g, err := d.Greeter.Greet(c.Request().Context(), c.QueryParam("name"))
+		switch {
+		case errors.Is(err, {{.P.domain.Name}}.ErrNameTooLong):
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case err != nil:
+			logger.FromContext(c.Request().Context(), d.Logger).Error("greet failed", "error", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		return c.JSON(http.StatusOK, g)
+	}
+}

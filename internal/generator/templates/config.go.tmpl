@@ -1,0 +1,48 @@
+// Package config reads service settings from environment variables.
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+// Config holds every setting the service needs.
+type Config struct {
+	ServiceName string
+	Env         string
+	Port        string
+	LogLevel    string
+{{- if .HasDB}}
+	DatabaseURL string
+{{- end}}
+}
+
+// Load reads the configuration. Secrets come only from the environment.
+func Load() (Config, error) {
+	c := Config{
+		ServiceName: getenv("SERVICE_NAME", "{{.Opt.Name}}"),
+		Env:         getenv("APP_ENV", "dev"),
+		Port:        getenv("PORT", "8080"),
+		LogLevel:    getenv("LOG_LEVEL", "INFO"),
+{{- if .HasDB}}
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+{{- end}}
+	}
+	if _, err := strconv.Atoi(c.Port); err != nil {
+		return Config{}, fmt.Errorf("config: PORT %q is not a number", c.Port)
+	}
+{{- if .HasDB}}
+	if c.DatabaseURL == "" {
+		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
+	}
+{{- end}}
+	return c, nil
+}
+
+func getenv(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
+	}
+	return def
+}

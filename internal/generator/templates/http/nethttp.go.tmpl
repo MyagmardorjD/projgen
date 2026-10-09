@@ -1,0 +1,124 @@
+// Package {{.P.http.Name}} exposes the service over HTTP using the standard library.
+package {{.P.http.Name}}
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"{{.P.domain.Import}}"
+	"{{.P.logger.Import}}"
+	{{.P.service.Name}} "{{.P.service.Import}}"
+)
+
+// HealthChecker is implemented by *sql.DB and anything else /health should ping.
+type HealthChecker interface {
+	PingContext(ctx context.Context) error
+}
+
+// Deps are the dependencies of the HTTP layer. Health may be nil.
+type Deps struct {
+	Greeter *{{.P.service.Name}}.Greeter
+	Health  HealthChecker
+	Logger  *slog.Logger
+}
+
+// NewRouter builds the HTTP handler with all routes and middleware.
+func NewRouter(d Deps) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", health(d))
+	mux.HandleFunc("GET /api/v1/hello", hello(d))
+	return requestLogger(d.Logger, recoverer(d.Logger, mux))
+}
+
+// Serve runs the server until ctx is cancelled, then shuts down gracefully.
+func Serve(ctx context.Context, addr string, d Deps) error {
+	srv := &http.Server{Addr: addr, Handler: NewRouter(d), ReadHeaderTimeout: 5 * time.Second}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func requestLogger(base *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		id := logger.RequestIDFrom(r.Header.Get("X-Request-ID"))
+		w.Header().Set("X-Request-ID", id)
+		r = r.WithContext(logger.WithRequestID(r.Context(), id))
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		logger.FromContext(r.Context(), base).Info("request completed",
+			"method", r.Method,
+			"path", r.Pattern,
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds())
+	})
+}
+
+func recoverer(base *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				logger.FromContext(r.Context(), base).Error("panic recovered", "panic", v)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func health(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.Health != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			if err := d.Health.PingContext(ctx); err != nil {
+				logger.FromContext(ctx, d.Logger).Error("health check failed", "error", err)
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+func hello(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		g, err := d.Greeter.Greet(r.Context(), r.URL.Query().Get("name"))
+		switch {
+		case errors.Is(err, {{.P.domain.Name}}.ErrNameTooLong):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case err != nil:
+			logger.FromContext(r.Context(), d.Logger).Error("greet failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		default:
+			writeJSON(w, http.StatusOK, g)
+		}
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}

@@ -1,0 +1,23 @@
+// Package {{.P.db.Name}} opens the {{.Opt.Database}} connection pool.
+// Add your repositories next to this file.
+package {{.P.db.Name}}
+
+import (
+	"database/sql"
+	"time"
+
+	_ "{{.DB.Import}}" // registers the "{{.DB.Driver}}" driver
+)
+
+// Open creates a connection pool. It does not connect until first use,
+// so the service starts even when the database is briefly unavailable.
+func Open(url string) (*sql.DB, error) {
+	db, err := sql.Open("{{.DB.Driver}}", url)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	return db, nil
+}

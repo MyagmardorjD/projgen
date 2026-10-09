@@ -1,0 +1,57 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SERVICE_NAME: {{.Opt.Name}}
+      APP_ENV: dev
+      PORT: "8080"
+      LOG_LEVEL: INFO
+{{- if .HasDB}}
+      DATABASE_URL: "{{.DB.ComposeURL}}"
+    depends_on:
+      db:
+        condition: service_healthy
+{{- end}}
+{{- if eq .Opt.Database "postgresql"}}
+
+  db:
+    image: {{.DB.Image}}
+    environment:
+      POSTGRES_USER: ${DB_USER:-app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-app}
+      POSTGRES_DB: ${DB_NAME:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+{{- else if eq .Opt.Database "mysql"}}
+
+  db:
+    image: {{.DB.Image}}
+    environment:
+      MYSQL_USER: ${DB_USER:-app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-app}
+      MYSQL_DATABASE: ${DB_NAME:-app}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+    ports:
+      - "3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+{{- end}}
+{{- if .HasDB}}
+
+volumes:
+  db-data:
+{{- end}}

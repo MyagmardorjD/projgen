@@ -1,0 +1,81 @@
+// Package logger writes structured JSON logs in the team format:
+// @timestamp, level, message (constant), service, env, request_id, logger.
+// Dynamic values always go in separate snake_case fields, never in message.
+package logger
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"io"
+	"log/slog"
+	"os"
+	"regexp"
+)
+
+type ctxKey struct{}
+
+// New returns a JSON logger writing to stdout.
+// level is DEBUG, INFO, WARN or ERROR; DEBUG is meant for development only.
+func New(service, env, level string) *slog.Logger {
+	return NewWithWriter(os.Stdout, service, env, level)
+}
+
+// NewWithWriter is New with a custom destination, used in tests.
+func NewWithWriter(w io.Writer, service, env, level string) *slog.Logger {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(level)); err != nil {
+		lvl = slog.LevelInfo
+	}
+	h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl, ReplaceAttr: rename})
+	return slog.New(h).With("service", service, "env", env, "logger", "app")
+}
+
+func rename(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) > 0 {
+		return a
+	}
+	switch a.Key {
+	case slog.TimeKey:
+		a.Key = "@timestamp"
+	case slog.MessageKey:
+		a.Key = "message"
+	}
+	return a
+}
+
+// System tags logs that do not belong to a request (startup, shutdown).
+func System(l *slog.Logger) *slog.Logger { return l.With("request_id", "system") }
+
+// WithRequestID stores the request id in ctx.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ctxKey{}, id)
+}
+
+// RequestID returns the request id stored in ctx, or "".
+func RequestID(ctx context.Context) string {
+	id, _ := ctx.Value(ctxKey{}).(string)
+	return id
+}
+
+// FromContext returns base with the request_id field of ctx.
+func FromContext(ctx context.Context, base *slog.Logger) *slog.Logger {
+	id := RequestID(ctx)
+	if id == "" {
+		id = "unknown"
+	}
+	return base.With("request_id", id)
+}
+
+var safeID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// RequestIDFrom returns the incoming X-Request-ID header when it is safe to
+// log, otherwise a new random id.
+func RequestIDFrom(header string) string {
+	if safeID.MatchString(header) {
+		return header
+	}
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}

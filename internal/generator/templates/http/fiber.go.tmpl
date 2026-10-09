@@ -1,0 +1,100 @@
+// Package {{.P.http.Name}} exposes the service over HTTP using Fiber.
+package {{.P.http.Name}}
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
+	"{{.P.domain.Import}}"
+	"{{.P.logger.Import}}"
+	{{.P.service.Name}} "{{.P.service.Import}}"
+)
+
+// HealthChecker is implemented by *sql.DB and anything else /health should ping.
+type HealthChecker interface {
+	PingContext(ctx context.Context) error
+}
+
+// Deps are the dependencies of the HTTP layer. Health may be nil.
+type Deps struct {
+	Greeter *{{.P.service.Name}}.Greeter
+	Health  HealthChecker
+	Logger  *slog.Logger
+}
+
+// NewRouter builds the Fiber app with all routes and middleware.
+func NewRouter(d Deps) *fiber.App {
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, ReadTimeout: 10 * time.Second})
+	app.Use(recover.New(), requestLogger(d.Logger))
+	app.Get("/health", health(d))
+	v1 := app.Group("/api/v1")
+	v1.Get("/hello", hello(d))
+	return app
+}
+
+// Serve runs the server until ctx is cancelled, then shuts down gracefully.
+func Serve(ctx context.Context, addr string, d Deps) error {
+	app := NewRouter(d)
+	errCh := make(chan error, 1)
+	go func() { errCh <- app.Listen(addr) }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	return app.ShutdownWithTimeout(10 * time.Second)
+}
+
+func requestLogger(base *slog.Logger) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		start := time.Now()
+		id := logger.RequestIDFrom(c.Get("X-Request-ID"))
+		c.Set("X-Request-ID", id)
+		c.SetUserContext(logger.WithRequestID(c.UserContext(), id))
+		err := c.Next()
+		if err != nil {
+			if herr := c.App().ErrorHandler(c, err); herr != nil {
+				_ = c.SendStatus(fiber.StatusInternalServerError)
+			}
+		}
+		logger.FromContext(c.UserContext(), base).Info("request completed",
+			"method", c.Method(),
+			"path", c.Route().Path,
+			"status", c.Response().StatusCode(),
+			"duration_ms", time.Since(start).Milliseconds())
+		return nil
+	}
+}
+
+func health(d Deps) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if d.Health != nil {
+			ctx, cancel := context.WithTimeout(c.UserContext(), 2*time.Second)
+			defer cancel()
+			if err := d.Health.PingContext(ctx); err != nil {
+				logger.FromContext(ctx, d.Logger).Error("health check failed", "error", err)
+				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable"})
+			}
+		}
+		return c.JSON(fiber.Map{"status": "ok"})
+	}
+}
+
+func hello(d Deps) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		g, err := d.Greeter.Greet(c.UserContext(), c.Query("name"))
+		switch {
+		case errors.Is(err, {{.P.domain.Name}}.ErrNameTooLong):
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		case err != nil:
+			logger.FromContext(c.UserContext(), d.Logger).Error("greet failed", "error", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		}
+		return c.JSON(g)
+	}
+}

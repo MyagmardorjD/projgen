@@ -1,0 +1,37 @@
+package {{.P.service.Name}}
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"{{.P.domain.Import}}"
+)
+
+func TestGreeter_Greet(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr error
+	}{
+		{"default", "", "Hello, World!", nil},
+		{"trims spaces", "  Bat  ", "Hello, Bat!", nil},
+		{"cyrillic", "Сараа", "Hello, Сараа!", nil},
+		{"at limit", strings.Repeat("a", {{.P.domain.Name}}.MaxNameLength), "Hello, " + strings.Repeat("a", {{.P.domain.Name}}.MaxNameLength) + "!", nil},
+		{"too long", strings.Repeat("a", {{.P.domain.Name}}.MaxNameLength+1), "", {{.P.domain.Name}}.ErrNameTooLong},
+	}
+	g := NewGreeter()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := g.Greet(context.Background(), tt.in)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if got.Message != tt.want {
+				t.Errorf("message = %q, want %q", got.Message, tt.want)
+			}
+		})
+	}
+}

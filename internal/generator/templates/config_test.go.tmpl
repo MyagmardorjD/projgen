@@ -1,0 +1,67 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr string
+		check   func(t *testing.T, c Config)
+	}{
+		{
+			name: "defaults",
+			env:  map[string]string{ {{- if .HasDB}}"DATABASE_URL": "test-dsn"{{end}} },
+			check: func(t *testing.T, c Config) {
+				if c.Port != "8080" || c.Env != "dev" || c.ServiceName != "{{.Opt.Name}}" || c.LogLevel != "INFO" {
+					t.Errorf("unexpected defaults: %+v", c)
+				}
+			},
+		},
+		{
+			name: "overrides",
+			env:  map[string]string{"PORT": "9090", "APP_ENV": "prod", {{- if .HasDB}}"DATABASE_URL": "test-dsn"{{end}} },
+			check: func(t *testing.T, c Config) {
+				if c.Port != "9090" || c.Env != "prod" {
+					t.Errorf("overrides not applied: %+v", c)
+				}
+			},
+		},
+		{
+			name:    "port not a number",
+			env:     map[string]string{"PORT": "http", {{- if .HasDB}}"DATABASE_URL": "test-dsn"{{end}} },
+			wantErr: "PORT",
+		},
+{{- if .HasDB}}
+		{
+			name:    "database url missing",
+			env:     map[string]string{"DATABASE_URL": ""},
+			wantErr: "DATABASE_URL",
+		},
+{{- end}}
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, k := range []string{"PORT", "APP_ENV", "SERVICE_NAME", "LOG_LEVEL", "DATABASE_URL"} {
+				t.Setenv(k, "")
+			}
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			c, err := Load()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			tt.check(t, c)
+		})
+	}
+}

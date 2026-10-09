@@ -1,0 +1,27 @@
+.PHONY: run build test cover vet tidy{{if .Opt.HasExtra "docker-compose"}} up down{{end}}
+
+run:
+	go run ./cmd/server
+
+build:
+	go build -o bin/{{.Opt.Name}} ./cmd/server
+
+test:
+	go test ./...
+
+cover:
+	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+
+vet:
+	gofmt -l . && go vet ./...
+
+tidy:
+	go mod tidy
+{{- if .Opt.HasExtra "docker-compose"}}
+
+up:
+	docker compose up --build
+
+down:
+	docker compose down
+{{- end}}

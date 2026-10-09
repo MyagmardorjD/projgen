@@ -1,0 +1,27 @@
+// Package {{.P.service.Name}} contains the business logic of {{.Opt.Name}}.
+package {{.P.service.Name}}
+
+import (
+	"context"
+	"strings"
+	"unicode/utf8"
+
+	"{{.P.domain.Import}}"
+)
+
+// Greeter is the example service. Replace it with your own use cases.
+type Greeter struct{}
+
+func NewGreeter() *Greeter { return &Greeter{} }
+
+// Greet builds a greeting for name, defaulting to "World".
+func (g *Greeter) Greet(_ context.Context, name string) ({{.P.domain.Name}}.Greeting, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "World"
+	}
+	if utf8.RuneCountInString(name) > {{.P.domain.Name}}.MaxNameLength {
+		return {{.P.domain.Name}}.Greeting{}, {{.P.domain.Name}}.ErrNameTooLong
+	}
+	return {{.P.domain.Name}}.Greeting{Message: "Hello, " + name + "!"}, nil
+}

@@ -1,0 +1,86 @@
+package {{.P.http.Name}}
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	{{.P.service.Name}} "{{.P.service.Import}}"
+)
+
+type fakeHealth struct{ err error }
+
+func (f fakeHealth) PingContext(context.Context) error { return f.err }
+
+func testDeps(h HealthChecker) Deps {
+	return Deps{
+		Greeter: {{.P.service.Name}}.NewGreeter(),
+		Health:  h,
+		Logger:  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	}
+}
+
+// do sends one request through the router and returns the response.
+func do(t *testing.T, d Deps, req *http.Request) (int, string, http.Header) {
+	t.Helper()
+{{- if eq .Opt.Framework "fiber"}}
+	resp, err := NewRouter(d).Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body), resp.Header
+{{- else}}
+	rec := httptest.NewRecorder()
+	NewRouter(d).ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String(), rec.Header()
+{{- end}}
+}
+
+func TestRoutes(t *testing.T) {
+	tests := []struct {
+		name       string
+		health     HealthChecker
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{"health without database", nil, "/health", http.StatusOK, `"status":"ok"`},
+		{"health database up", fakeHealth{}, "/health", http.StatusOK, `"status":"ok"`},
+		{"health database down", fakeHealth{errors.New("down")}, "/health", http.StatusServiceUnavailable, `"status":"unavailable"`},
+		{"hello default", nil, "/api/v1/hello", http.StatusOK, `"message":"Hello, World!"`},
+		{"hello name", nil, "/api/v1/hello?name=Bat", http.StatusOK, `"message":"Hello, Bat!"`},
+		{"hello name too long", nil, "/api/v1/hello?name=" + strings.Repeat("a", 101), http.StatusBadRequest, `"error"`},
+		{"unknown route", nil, "/nope", http.StatusNotFound, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, body, _ := do(t, testDeps(tt.health), httptest.NewRequest(http.MethodGet, tt.path, nil))
+			if status != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body %s)", status, tt.wantStatus, body)
+			}
+			if !strings.Contains(body, tt.wantBody) {
+				t.Errorf("body = %s, want to contain %s", body, tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestRequestID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("X-Request-ID", "abc-123")
+	if _, _, h := do(t, testDeps(nil), req); h.Get("X-Request-ID") != "abc-123" {
+		t.Errorf("X-Request-ID = %q, want the incoming id", h.Get("X-Request-ID"))
+	}
+
+	_, _, h := do(t, testDeps(nil), httptest.NewRequest(http.MethodGet, "/health", nil))
+	if len(h.Get("X-Request-ID")) != 32 {
+		t.Errorf("X-Request-ID = %q, want a generated 32-char id", h.Get("X-Request-ID"))
+	}
+}

@@ -1,0 +1,15 @@
+// Package {{.P.domain.Name}} holds the core types of {{.Opt.Name}}.
+package {{.P.domain.Name}}
+
+import "errors"
+
+// MaxNameLength is the longest name Greet accepts.
+const MaxNameLength = 100
+
+// ErrNameTooLong is returned when a name exceeds MaxNameLength characters.
+var ErrNameTooLong = errors.New("name must be at most 100 characters")
+
+// Greeting is the example resource. Replace it with your own entities.
+type Greeting struct {
+	Message string `json:"message"`
+}

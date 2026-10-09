@@ -1,0 +1,21 @@
+stages:
+  - test
+  - build
+
+test:
+  stage: test
+  image: golang:{{.GoVersion}}
+  script:
+    - test -z "$(gofmt -l .)"
+    - go vet ./...
+    - go test -race -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out
+
+build:
+  stage: build
+  image: golang:{{.GoVersion}}
+  script:
+    - CGO_ENABLED=0 go build -o bin/{{.Opt.Name}} ./cmd/server
+  artifacts:
+    paths:
+      - bin/
