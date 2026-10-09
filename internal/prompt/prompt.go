@@ -33,7 +33,7 @@ func (p *Prompter) Ask() (options.Options, error) {
 	if o.Name, err = p.text("Project name", "my-service"); err != nil {
 		return o, err
 	}
-	if o.Module, err = p.text("Go module path", "github.com/techpartners/"+o.Name); err != nil {
+	if o.Module, err = p.text("Go module path", "github.com/MyagmardorjD/"+o.Name); err != nil {
 		return o, err
 	}
 	if o.Language, err = p.choice("Language", options.Languages); err != nil {

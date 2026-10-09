@@ -8,7 +8,7 @@ import (
 func valid() Options {
 	return Options{
 		Name:         "order-service",
-		Module:       "github.com/techpartners/order-service",
+		Module:       "github.com/MyagmardorjD/order-service",
 		Language:     "go",
 		Framework:    "gin",
 		Architecture: "clean",

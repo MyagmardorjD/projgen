@@ -21,7 +21,7 @@ projgen list                         # дэмжигдэх бүх сонголт
 
 ```yaml
 name: order-service
-module: github.com/techpartners/order-service
+module: github.com/MyagmardorjD/order-service
 language: go
 framework: gin            # gin | echo | fiber | nethttp
 architecture: clean       # layered | clean | hexagonal
