@@ -1,0 +1,17 @@
+package {{.P.domain.Name}};
+
+import java.util.List;
+
+/** Stores {{.E.Name}} records. Methods throw {@link NotFoundException} for a missing id. */
+public interface {{.E.Name}}Repository {
+
+    {{.E.Name}} create({{.E.Name}}Input in);
+
+    {{.E.Name}} get(long id);
+
+    List<{{.E.Name}}> list(int limit, int offset);
+
+    {{.E.Name}} update(long id, {{.E.Name}}Input in);
+
+    void delete(long id);
+}

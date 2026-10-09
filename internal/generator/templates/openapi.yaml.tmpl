@@ -19,9 +19,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Status"
+{{- if .Observability}}
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Metrics in the Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+{{- end}}
   /api/v1/hello:
     get:
       summary: Example endpoint returning a greeting
+{{- if .Auth}}
+      security:
+        - bearerAuth: []
+{{- end}}
       parameters:
         - name: name
           in: query
@@ -42,7 +58,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+{{- if .Auth}}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/me:
+    get:
+      summary: Who the bearer token belongs to
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token subject
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject:
+                    type: string
+                    example: alice
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+{{- end}}
 components:
+{{- if .Auth}}
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Missing, invalid or expired bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+{{- end}}
   schemas:
     Status:
       type: object

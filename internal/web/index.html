@@ -75,6 +75,11 @@ td small { display: block; color: var(--muted); font-size: 11.5px; }
 details { margin-top: 10px; }
 details pre { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; overflow: auto; max-height: 220px; white-space: pre-wrap; }
 .hidden { display: none !important; }
+.fields { display: grid; gap: 8px; margin-bottom: 10px; }
+.fieldrow { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+.fieldrow label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; white-space: nowrap; cursor: pointer; }
+@media (max-width: 560px) { .fieldrow { grid-template-columns: 1fr 1fr; } }
+.filelist { font-family: var(--mono); font-size: 12.5px; line-height: 1.7; margin: 6px 0 0; padding-left: 18px; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -142,6 +147,24 @@ details pre { font-family: var(--mono); font-size: 12px; background: var(--bg); 
       <div id="resultWarn"></div>
       <details><summary>Гүйцэтгэлийн лог</summary><pre id="resultLog"></pre></details>
     </div>
+
+    <form class="card" id="entityForm" autocomplete="off">
+      <h2>Entity нэмэх (CRUD)</h2>
+      <p class="count" style="margin:-4px 0 14px">projgen-ээр үүсгэсэн Go эсвэл Java төсөлд domain, service, repository, HTTP handler, migration, тест нэмнэ.</p>
+      <label class="field"><span>Төслийн хавтас (project.yaml байрлах)</span><input type="text" id="entityDir" spellcheck="false"></label>
+      <label class="field"><span>Entity-ийн нэр</span><input type="text" id="entityName" placeholder="Product" spellcheck="false"></label>
+      <span class="count">Талбарууд (snake_case; id, created_at, updated_at автоматаар нэмэгдэнэ)</span>
+      <div class="fields" id="entityFields" style="margin-top:6px"></div>
+      <button type="button" class="small" id="addField">+ Талбар</button>
+      <div class="msg warn hidden" id="entityExists">Энэ entity-ийн файл аль хэдийн байна.
+        <label style="display:block;margin-top:6px"><input type="checkbox" id="entityForce"> Дарж бичихийг зөвшөөрөх</label>
+      </div>
+      <div id="entityMsg"></div>
+      <div class="actions">
+        <button type="submit" class="primary" id="entityAddBtn">Entity нэмэх</button>
+        <button type="button" id="entityPreviewBtn">Урьдчилан харах</button>
+      </div>
+    </form>
   </div>
 
   <aside>
@@ -282,6 +305,7 @@ async function createProject(ev) {
     $('resultWarn').replaceChildren(...data.warnings.map((w) => el('div', { class: 'msg warn' }, w)));
     $('resultLog').textContent = data.log || '(лог хоосон)';
     $('result').classList.remove('hidden');
+    $('entityDir').value = data.dir;
     $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     preview();
   } catch (e) {
@@ -322,6 +346,64 @@ async function updateVersions() {
     preview();
   } finally {
     btn.disabled = false; btn.textContent = 'Шинэчлэх';
+  }
+}
+
+function fieldRow(name = '', type = 'string', required = false) {
+  const types = meta.field_types.map((t) => el('option', { value: t, selected: t === type }, t));
+  const remove = el('button', { type: 'button', class: 'small', title: 'Устгах', 'aria-label': 'Талбар устгах' }, '✕');
+  const row = el('div', { class: 'fieldrow' },
+    el('input', { type: 'text', value: name, placeholder: 'unit_price', spellcheck: false, 'aria-label': 'Талбарын нэр' }),
+    el('select', { 'aria-label': 'Төрөл' }, ...types),
+    el('label', {}, el('input', { type: 'checkbox', checked: required }), 'required'),
+    remove);
+  remove.addEventListener('click', () => row.remove());
+  return row;
+}
+
+function entityPayload() {
+  return {
+    dir: $('entityDir').value.trim(),
+    name: $('entityName').value.trim(),
+    force: $('entityForce').checked,
+    fields: [...$('entityFields').children].map((r) => ({
+      name: r.querySelector('input[type=text]').value.trim(),
+      type: r.querySelector('select').value,
+      required: r.querySelector('input[type=checkbox]').checked,
+    })).filter((f) => f.name !== ''),
+  };
+}
+
+function fileList(title, files) {
+  return files.length ? [el('b', {}, title), el('ul', { class: 'filelist' }, ...files.map((f) => el('li', {}, f)))] : [];
+}
+
+async function entity(path) {
+  const btns = ['entityAddBtn', 'entityPreviewBtn'].map($);
+  btns.forEach((b) => { b.disabled = true; });
+  try {
+    const res = await api(path, entityPayload());
+    const data = await res.json();
+    $('entityExists').classList.toggle('hidden', res.status !== 409 && !$('entityForce').checked);
+    if (!res.ok) {
+      $('entityMsg').replaceChildren(el('div', { class: 'msg err' }, el('ul', {}, ...data.errors.map((e) => el('li', {}, e)))));
+      return;
+    }
+    const added = path === '/api/entity';
+    const next = data.java ? './mvnw verify' : 'go test ./...';
+    const box = el('div', { class: 'msg ok' },
+      el('div', {}, added ? 'Нэмэгдлээ. Дараа нь: ' + next : 'Дараах файлууд үүснэ:'),
+      ...fileList(added ? 'Үүссэн' : 'Үүсэх', data.created),
+      ...fileList(added ? 'Шинэчилсэн' : 'Шинэчлэх', data.modified),
+      ...fileList('Хэвээр', data.skipped));
+    const extra = [];
+    if (data.manual.length) extra.push(el('div', { class: 'msg warn' }, 'Энэ төсөлд projgen тэмдэг алга; гараар нэмнэ үү:', el('pre', {}, data.manual.join('\n'))));
+    if (added && data.auto_migrate) extra.push(el('div', { class: 'msg ok' }, 'Migration дараагийн асалтад автоматаар ажиллана.'));
+    $('entityMsg').replaceChildren(box, ...extra);
+  } catch (e) {
+    $('entityMsg').replaceChildren(el('div', { class: 'msg err' }, String(e)));
+  } finally {
+    btns.forEach((b) => { b.disabled = false; });
   }
 }
 
@@ -421,6 +503,10 @@ async function init() {
   $('openCode').addEventListener('click', () => openDir('code'));
   $('openFolder').addEventListener('click', () => openDir('folder'));
   $('copyPath').addEventListener('click', () => navigator.clipboard.writeText($('resultDir').dataset.dir));
+  $('entityFields').append(fieldRow('name', 'string', true), fieldRow('price', 'float'));
+  $('addField').addEventListener('click', () => $('entityFields').append(fieldRow()));
+  $('entityForm').addEventListener('submit', (ev) => { ev.preventDefault(); entity('/api/entity'); });
+  $('entityPreviewBtn').addEventListener('click', () => entity('/api/entity/preview'));
   preview();
 }
 

@@ -28,6 +28,8 @@ func fakeSources(t *testing.T, broken map[string]bool) *Fetcher {
 	}
 	mux.HandleFunc("/hub/v2/repositories/library/postgres/tags", reply("postgres",
 		`{"results":[{"name":"20beta1-alpine"},{"name":"19.2-alpine"},{"name":"19-alpine"},{"name":"18-alpine"},{"name":"alpine"},{"name":"19-alpine3.24"}]}`))
+	mux.HandleFunc("/hub/v2/repositories/library/redis/tags", reply("redis",
+		`{"results":[{"name":"9-rc1-alpine"},{"name":"8.8-alpine"},{"name":"8-alpine"},{"name":"7-alpine"},{"name":"alpine"}]}`))
 	mux.HandleFunc("/hub/v2/repositories/library/mysql/tags", reply("mysql",
 		`{"results":[{"name":"latest","digest":"sha256:inno"},{"name":"lts","digest":"sha256:lts"},{"name":"9.9.1","digest":"sha256:lts"},{"name":"9.9","digest":"sha256:lts"},{"name":"9","digest":"sha256:lts"},{"name":"8.4","digest":"sha256:old"},{"name":"10.1","digest":"sha256:inno"}]}`))
 	for _, a := range Actions {
@@ -66,6 +68,9 @@ func TestFetch(t *testing.T) {
 	}
 	if v.Images["postgres"] != "19-alpine" {
 		t.Errorf("postgres = %q, want 19-alpine (beta skipped)", v.Images["postgres"])
+	}
+	if v.Images["redis"] != "8-alpine" {
+		t.Errorf("redis = %q, want 8-alpine (rc skipped)", v.Images["redis"])
 	}
 	if v.Images["mysql"] != "9.9" {
 		t.Errorf("mysql = %q, want 9.9 (the lts tag)", v.Images["mysql"])
@@ -107,7 +112,7 @@ func TestFetch_PartialFailureKeepsOldValues(t *testing.T) {
 }
 
 func TestFetch_AllFail(t *testing.T) {
-	broken := map[string]bool{"go": true, "postgres": true, "mysql": true, "java lts": true}
+	broken := map[string]bool{"go": true, "postgres": true, "redis": true, "mysql": true, "java lts": true}
 	for _, path := range JavaArtifacts {
 		broken[path] = true
 	}
@@ -194,6 +199,32 @@ func TestFetch_GitHubTokenOnlySentToGitHub(t *testing.T) {
 	for _, src := range []string{"dl", "proxy", "hub", "adoptium", "maven"} {
 		if auth[src] != "" {
 			t.Errorf("token leaked to %s", src)
+		}
+	}
+}
+
+func TestLatestProjgen(t *testing.T) {
+	for _, tt := range []struct {
+		status     int
+		body, want string
+		wantErr    bool
+	}{
+		{http.StatusOK, `{"tag_name":"v0.3.1"}`, "v0.3.1", false},
+		{http.StatusOK, `{"tag_name":"nightly"}`, "", true},
+		{http.StatusNotFound, `{}`, "", true}, // no release yet
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/repos/"+ProjgenRepo+"/releases/latest" {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(tt.status)
+			w.Write([]byte(tt.body))
+		}))
+		got, err := (&Fetcher{Client: srv.Client(), GitHub: srv.URL}).LatestProjgen(context.Background())
+		srv.Close()
+		if got != tt.want || (err != nil) != tt.wantErr {
+			t.Errorf("%s: got %q, %v", tt.body, got, err)
 		}
 	}
 }

@@ -12,20 +12,48 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"{{.P.domain.Import}}"
+{{- if .Auth}}
+	"{{.P.auth.Import}}"
+{{- end}}
 	"{{.P.logger.Import}}"
 	{{.P.service.Name}} "{{.P.service.Import}}"
+{{- if .Observability}}
+	"{{.P.telemetry.Import}}"
+{{- end}}
 )
 
 // HealthChecker is implemented by *sql.DB and anything else /health should ping.
 type HealthChecker interface {
 	PingContext(ctx context.Context) error
 }
+{{- if .Redis}}
+
+// HealthChecks pings every checker in order and returns the first error.
+type HealthChecks []HealthChecker
+
+func (hs HealthChecks) PingContext(ctx context.Context) error {
+	for _, h := range hs {
+		if err := h.PingContext(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+{{- end}}
 
 // Deps are the dependencies of the HTTP layer. Health may be nil.
 type Deps struct {
 	Greeter *{{.P.service.Name}}.Greeter
 	Health  HealthChecker
 	Logger  *slog.Logger
+{{- if .Auth}}
+	// Auth checks bearer tokens on /api/v1; nil turns authentication off (tests).
+	Auth *auth.Verifier
+{{- end}}
+{{- if .Observability}}
+	// Telemetry serves /metrics and traces requests; nil turns both off (tests).
+	Telemetry *telemetry.Telemetry
+{{- end}}
 	// projgen:deps (projgen add entity inserts fields here)
 }
 
@@ -34,10 +62,23 @@ func NewRouter(d Deps) http.Handler {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
-	e.Use(middleware.Recover(), requestLogger(d.Logger))
+	e.Use(middleware.Recover(), requestLogger(d.Logger{{if .Observability}}, d.Telemetry{{end}}))
 	e.GET("/health", health(d))
+{{- if .Observability}}
+	if d.Telemetry != nil {
+		e.GET("/metrics", echo.WrapHandler(d.Telemetry.MetricsHandler()))
+	}
+{{- end}}
 	v1 := e.Group("/api/v1")
+{{- if .Auth}}
+	if d.Auth != nil {
+		v1.Use(requireAuth(d.Auth))
+	}
+{{- end}}
 	v1.GET("/hello", hello(d))
+{{- if .Auth}}
+	v1.GET("/me", me)
+{{- end}}
 	// projgen:routes (projgen add entity inserts routes here)
 	return e
 }
@@ -57,17 +98,26 @@ func Serve(ctx context.Context, addr string, d Deps) error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-func requestLogger(base *slog.Logger) echo.MiddlewareFunc {
+func requestLogger(base *slog.Logger{{if .Observability}}, tel *telemetry.Telemetry{{end}}) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			start := time.Now()
 			req := c.Request()
 			id := logger.RequestIDFrom(req.Header.Get("X-Request-ID"))
 			c.Response().Header().Set("X-Request-ID", id)
+{{- if .Observability}}
+			ctx, end := tel.StartRequest(logger.WithRequestID(req.Context(), id), req.Header, req.Method)
+			c.SetRequest(req.WithContext(ctx))
+			if err := next(c); err != nil {
+				c.Error(err)
+			}
+			end(c.Path(), c.Response().Status)
+{{- else}}
 			c.SetRequest(req.WithContext(logger.WithRequestID(req.Context(), id)))
 			if err := next(c); err != nil {
 				c.Error(err)
 			}
+{{- end}}
 			logger.FromContext(c.Request().Context(), base).Info("request completed",
 				"method", req.Method,
 				"path", c.Path(),
@@ -78,6 +128,29 @@ func requestLogger(base *slog.Logger) echo.MiddlewareFunc {
 	}
 }
 
+{{if .Auth -}}
+// requireAuth rejects requests without a valid bearer token with 401.
+func requireAuth(v *auth.Verifier) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			claims, err := v.Verify(c.Request().Header.Get("Authorization"))
+			if err != nil {
+				c.Response().Header().Set("WWW-Authenticate", "Bearer")
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			}
+			c.SetRequest(c.Request().WithContext(auth.WithClaims(c.Request().Context(), claims)))
+			return next(c)
+		}
+	}
+}
+
+// me returns who the bearer token belongs to.
+func me(c echo.Context) error {
+	claims, _ := auth.FromContext(c.Request().Context())
+	return c.JSON(http.StatusOK, map[string]string{"subject": claims.Subject})
+}
+
+{{end -}}
 func health(d Deps) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if d.Health != nil {

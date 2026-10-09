@@ -1,0 +1,70 @@
+package {{.P.service.Name}};
+
+import {{.P.domain.Name}}.NotFoundException;
+import {{.P.domain.Name}}.ValidationException;
+import {{.P.domain.Name}}.{{.E.Name}};
+import {{.P.domain.Name}}.{{.E.Name}}Input;
+import {{.P.domain.Name}}.{{.E.Name}}Repository;
+import java.util.List;
+import org.springframework.stereotype.Service;
+
+/** Business rules for {{.E.Table}}. */
+@Service
+public class {{.E.Name}}Service {
+
+    static final int DEFAULT_PAGE_SIZE = 20;
+    static final int MAX_PAGE_SIZE = 100;
+
+    private final {{.E.Name}}Repository repo;
+
+    public {{.E.Name}}Service({{.E.Name}}Repository repo) {
+        this.repo = repo;
+    }
+
+    /** Validates in and stores a new record. */
+    public {{.E.Name}} create({{.E.Name}}Input in) {
+        validate(in);
+        return repo.create(in);
+    }
+
+    /** Returns one record or throws {@link NotFoundException}. */
+    public {{.E.Name}} get(long id) {
+        if (id <= 0) {
+            throw new NotFoundException();
+        }
+        return repo.get(id);
+    }
+
+    /** Returns one page ordered by id. limit defaults to 20 and is capped at 100. */
+    public List<{{.E.Name}}> list(int limit, int offset) {
+        if (limit <= 0) {
+            limit = DEFAULT_PAGE_SIZE;
+        }
+        limit = Math.min(limit, MAX_PAGE_SIZE);
+        return repo.list(limit, Math.max(offset, 0));
+    }
+
+    /** Validates in and replaces the record's fields. */
+    public {{.E.Name}} update(long id, {{.E.Name}}Input in) {
+        validate(in);
+        if (id <= 0) {
+            throw new NotFoundException();
+        }
+        return repo.update(id, in);
+    }
+
+    /** Removes the record or throws {@link NotFoundException}. */
+    public void delete(long id) {
+        if (id <= 0) {
+            throw new NotFoundException();
+        }
+        repo.delete(id);
+    }
+
+    private static void validate({{.E.Name}}Input in) {
+        List<String> problems = in.problems();
+        if (!problems.isEmpty()) {
+            throw new ValidationException(problems);
+        }
+    }
+}

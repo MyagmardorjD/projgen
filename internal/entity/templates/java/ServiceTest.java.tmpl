@@ -1,0 +1,98 @@
+package {{.P.service.Name}};
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import {{.P.db.Name}}.InMemory{{.E.Name}}Repository;
+import {{.P.domain.Name}}.NotFoundException;
+{{- if or .FirstRequired .HasTime}}
+import {{.P.domain.Name}}.ValidationException;
+{{- end}}
+import {{.P.domain.Name}}.{{.E.Name}};
+import {{.P.domain.Name}}.{{.E.Name}}Input;
+{{- if .HasTime}}
+import java.time.Instant;
+{{- end}}
+import org.junit.jupiter.api.Test;
+
+class {{.E.Name}}ServiceTest {
+
+    private final {{.E.Name}}Service service = new {{.E.Name}}Service(new InMemory{{.E.Name}}Repository());
+
+    private static {{.E.Name}}Input sample() {
+        return new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.JavaSample}}{{end}});
+    }
+
+    @Test
+    void createAndGet() {
+        {{.E.Name}} created = service.create(sample());
+        assertThat(created.id()).isPositive();
+        assertThat(service.get(created.id())).isEqualTo(created);
+    }
+
+    @Test
+    void absentFieldsGetZeroValues() {
+        {{.E.Name}}Input in = new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{if or $f.Required (eq $f.Type "time")}}{{$f.JavaSample}}{{else}}null{{end}}{{end}});
+{{- range .Fields}}
+{{- if and .JavaZero (not .Required)}}
+        assertThat(in.{{.Java}}()).isEqualTo({{.JavaZero}});
+{{- end}}
+{{- end}}
+    }
+{{- if .FirstRequired}}
+
+    @Test
+    void createRejectsBlank{{.FirstRequired.Go}}() {
+        {{.E.Name}}Input in = new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{if eq $f.Name $.FirstRequired.Name}}" "{{else}}{{$f.JavaSample}}{{end}}{{end}});
+        assertThatThrownBy(() -> service.create(in))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("{{.FirstRequired.JSON}} is required");
+    }
+{{- end}}
+{{- range .Fields}}
+{{- if eq .Type "time"}}
+
+    @Test
+    void createRequires{{.Go}}() {
+        {{$.E.Name}}Input in = new {{$.E.Name}}Input({{range $i, $f := $.Fields}}{{if $i}}, {{end}}{{if eq $f.Type "time"}}null{{else}}{{$f.JavaSample}}{{end}}{{end}});
+        assertThatThrownBy(() -> service.create(in))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("{{.JSON}} is required");
+    }
+{{- end}}
+{{- end}}
+
+    @Test
+    void listPages() {
+        for (int i = 0; i < 3; i++) {
+            service.create(sample());
+        }
+        assertThat(service.list(0, 0)).hasSize(3);
+        assertThat(service.list(2, 0)).hasSize(2);
+        assertThat(service.list(2, 2)).hasSize(1);
+        assertThat(service.list(1000, -5)).hasSize(3);
+    }
+
+    @Test
+    void update() {
+        {{.E.Name}} created = service.create(sample());
+        {{.E.Name}} updated = service.update(created.id(), sample());
+        assertThat(updated.id()).isEqualTo(created.id());
+        assertThat(updated.createdAt()).isEqualTo(created.createdAt());
+    }
+
+    @Test
+    void delete() {
+        {{.E.Name}} created = service.create(sample());
+        service.delete(created.id());
+        assertThatThrownBy(() -> service.get(created.id())).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void missingIsNotFound() {
+        assertThatThrownBy(() -> service.get(0)).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> service.get(99)).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> service.update(99, sample())).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> service.delete(99)).isInstanceOf(NotFoundException.class);
+    }
+}

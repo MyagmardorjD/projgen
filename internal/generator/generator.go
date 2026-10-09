@@ -86,6 +86,11 @@ type Data struct {
 	Migrations bool   // the migrations extra is chosen
 	Stamp      string // generation time, used to name the first migration
 
+	Auth          bool   // JWT authentication on /api/v1
+	Observability bool   // Prometheus metrics and OpenTelemetry tracing
+	Redis         bool   // Redis cache
+	RedisImage    string // docker image with tag
+
 	Java    bool   // language is java
 	BasePkg string // Java base package (module)
 	BaseDir string // Java: src/main/java/<base package path>
@@ -114,6 +119,10 @@ var layouts = map[string]map[string][2]string{
 		"service": {"internal/service", "service"},
 		"http":    {"internal/handler", "handler"},
 		"db":      {"internal/repository", "repository"},
+
+		"auth":      {"internal/auth", "auth"},
+		"cache":     {"internal/cache", "cache"},
+		"telemetry": {"internal/telemetry", "telemetry"},
 	},
 	"clean": {
 		"config":  {"config", "config"},
@@ -122,6 +131,10 @@ var layouts = map[string]map[string][2]string{
 		"service": {"internal/usecase", "usecase"},
 		"http":    {"internal/delivery/http", "delivery"},
 		"db":      {"internal/repository/{db}", "{db}"},
+
+		"auth":      {"pkg/auth", "auth"},
+		"cache":     {"internal/repository/cache", "cache"},
+		"telemetry": {"pkg/telemetry", "telemetry"},
 	},
 	"hexagonal": {
 		"config":  {"internal/config", "config"},
@@ -130,6 +143,10 @@ var layouts = map[string]map[string][2]string{
 		"service": {"internal/core/services", "services"},
 		"http":    {"internal/adapters/http", "httpadapter"},
 		"db":      {"internal/adapters/db", "dbadapter"},
+
+		"auth":      {"internal/adapters/auth", "auth"},
+		"cache":     {"internal/adapters/cache", "cache"},
+		"telemetry": {"pkg/telemetry", "telemetry"},
 	},
 }
 
@@ -185,6 +202,7 @@ func NewData(o options.Options, v versions.Versions) Data {
 	}
 	d := Data{Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], V: v,
 		Migrations: o.HasExtra("migrations"), Stamp: time.Now().UTC().Format("20060102150405")}
+	d.setExtras(v)
 	if m, ok := frameworkModules[o.Framework]; ok {
 		d.Requires = append(d.Requires, Require{m, v.Modules[m]})
 	}
@@ -195,7 +213,28 @@ func NewData(o options.Options, v versions.Versions) Data {
 	if d.Migrations {
 		d.Requires = append(d.Requires, Require{versions.Migrate, v.Modules[versions.Migrate]})
 	}
+	var mods []string
+	if d.Auth {
+		mods = append(mods, versions.JWT)
+	}
+	if d.Redis {
+		mods = append(mods, versions.Redis)
+	}
+	if d.Observability {
+		mods = append(mods, versions.Prometheus, versions.Otel, versions.OtelOTLP, versions.OtelSDK, versions.OtelTrace)
+	}
+	for _, m := range mods {
+		d.Requires = append(d.Requires, Require{m, v.Modules[m]})
+	}
 	return d
+}
+
+// setExtras sets the flags for the auth, observability and redis extras.
+func (d *Data) setExtras(v versions.Versions) {
+	d.Auth = d.Opt.HasExtra("auth")
+	d.Observability = d.Opt.HasExtra("observability")
+	d.Redis = d.Opt.HasExtra("redis")
+	d.RedisImage = "redis:" + v.Images["redis"]
 }
 
 func newJavaData(o options.Options, v versions.Versions) Data {
@@ -212,6 +251,7 @@ func newJavaData(o options.Options, v versions.Versions) Data {
 		Migrations: o.HasExtra("migrations"),
 		Java:       true, BasePkg: o.Module, BaseDir: baseDir, App: className(o.Name) + "Application",
 	}
+	d.setExtras(v)
 	if d.HasDB {
 		d.DB.Image += ":" + v.Images[d.DB.Image]
 	}
@@ -258,6 +298,18 @@ func javaPlan(d Data) []file {
 		{p["service"].TestDir + "/GreeterServiceTest.java", "java/GreeterServiceTest.java.tmpl", false},
 		{p["http"].TestDir + "/HelloControllerTest.java", "java/HelloControllerTest.java.tmpl", false},
 		{p["http"].TestDir + "/HealthControllerTest.java", "java/HealthControllerTest.java.tmpl", false},
+	}
+	if d.Auth {
+		files = append(files,
+			file{p["config"].Dir + "/SecurityConfig.java", "java/SecurityConfig.java.tmpl", false},
+			file{p["http"].Dir + "/MeController.java", "java/MeController.java.tmpl", false},
+		)
+	}
+	if d.Redis {
+		files = append(files, file{p["config"].Dir + "/CacheConfig.java", "java/CacheConfig.java.tmpl", false})
+	}
+	if d.Auth || d.Observability {
+		files = append(files, file{testBase + "/ServerTests.java", "java/ServerTests.java.tmpl", false})
 	}
 	if d.Migrations {
 		files = append(files,
@@ -312,6 +364,25 @@ func plan(d Data) []file {
 			file{"migrations/migrations.go", "migrations/migrations.go.tmpl", false},
 			file{p["db"].Dir + "/migrate.go", "migrations/migrate.go.tmpl", false},
 			file{p["db"].Dir + "/migrate_test.go", "migrations/migrate_test.go.tmpl", false},
+		)
+	}
+	if d.Auth {
+		files = append(files,
+			file{p["auth"].Dir + "/auth.go", "auth/auth.go.tmpl", false},
+			file{p["auth"].Dir + "/auth_test.go", "auth/auth_test.go.tmpl", false},
+			file{"cmd/token/main.go", "auth/token.go.tmpl", false},
+		)
+	}
+	if d.Redis {
+		files = append(files,
+			file{p["cache"].Dir + "/cache.go", "cache/cache.go.tmpl", false},
+			file{p["cache"].Dir + "/cache_test.go", "cache/cache_test.go.tmpl", false},
+		)
+	}
+	if d.Observability {
+		files = append(files,
+			file{p["telemetry"].Dir + "/telemetry.go", "telemetry/telemetry.go.tmpl", false},
+			file{p["telemetry"].Dir + "/telemetry_test.go", "telemetry/telemetry_test.go.tmpl", false},
 		)
 	}
 	extras := map[string]file{

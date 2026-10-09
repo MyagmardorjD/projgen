@@ -1,0 +1,31 @@
+// Command token prints a signed JWT for local development:
+//
+//	JWT_SECRET=... go run ./cmd/token -sub alice
+//	curl -H "Authorization: Bearer $(go run ./cmd/token -sub alice)" localhost:8080/api/v1/me
+//
+// It signs with JWT_SECRET (and JWT_ISSUER, JWT_AUDIENCE when set). Never use
+// it to issue production tokens; they come from your identity service.
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"time"
+
+	"{{.P.auth.Import}}"
+	"{{.P.logger.Import}}"
+)
+
+func main() {
+	sub := flag.String("sub", "dev-user", "subject (user id) of the token")
+	ttl := flag.Duration("ttl", time.Hour, "how long the token is valid")
+	flag.Parse()
+
+	tok, err := auth.Sign(os.Getenv("JWT_SECRET"), *sub, os.Getenv("JWT_ISSUER"), os.Getenv("JWT_AUDIENCE"), *ttl)
+	if err != nil {
+		logger.System(logger.New("token", "dev", "INFO")).Error("token signing failed", "error", err)
+		os.Exit(1)
+	}
+	fmt.Println(tok)
+}

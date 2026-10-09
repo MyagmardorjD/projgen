@@ -1,0 +1,75 @@
+package {{.P.http.Name}};
+
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import {{.P.db.Name}}.InMemory{{.E.Name}}Repository;
+import {{.P.service.Name}}.{{.E.Name}}Service;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+class {{.E.Name}}ControllerTest {
+
+    private static final String PATH = "/api/v1/{{.E.Route}}";
+    private static final String BODY = """
+            { {{- .SampleJSON -}} }""";
+
+    private final MockMvc mvc = MockMvcBuilders
+            .standaloneSetup(new {{.E.Name}}Controller(new {{.E.Name}}Service(new InMemory{{.E.Name}}Repository())))
+            .setControllerAdvice(new EntityExceptionHandler(), new ApiExceptionHandler())
+            .build();
+
+    @Test
+    void crud() throws Exception {
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(1))
+{{- range .Fields}}
+                .andExpect(jsonPath("$.{{.JSON}}").exists())
+{{- end}}
+                .andExpect(jsonPath("$.created_at").exists());
+        mvc.perform(get(PATH + "/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1));
+        mvc.perform(get(PATH).param("limit", "abc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+        mvc.perform(put(PATH + "/1").contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isOk());
+        mvc.perform(delete(PATH + "/1"))
+                .andExpect(status().isNoContent());
+        mvc.perform(get(PATH + "/1"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(containsString("not found")));
+    }
+
+    @Test
+    void invalidJsonIsBadRequest() throws Exception {
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content("{"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("invalid JSON body")));
+    }
+
+    @Test
+    void invalidIdIsBadRequest() throws Exception {
+        mvc.perform(get(PATH + "/abc"))
+                .andExpect(status().isBadRequest());
+    }
+{{- if .FirstRequired}}
+
+    @Test
+    void missing{{.FirstRequired.Go}}IsUnprocessable() throws Exception {
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().is(422))
+                .andExpect(content().string(containsString("{{.FirstRequired.JSON}} is required")));
+    }
+{{- end}}
+}

@@ -1,34 +1,58 @@
 package {{.P.http.Name}};
 
 import java.util.Map;
-{{- if .HasDB}}
+{{- if or .HasDB .Redis}}
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
+{{- end}}
+{{- if .Redis}}
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+{{- end}}
+{{- if .HasDB}}
 import org.springframework.jdbc.core.JdbcTemplate;
 {{- end}}
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** GET /health: 200 when the service{{if .HasDB}} and its database are{{else}} is{{end}} up{{if .HasDB}}, 503 otherwise{{end}}. */
+/** GET /health: 200 when the service{{if or .HasDB .Redis}} and its {{if .HasDB}}database{{end}}{{if and .HasDB .Redis}} and {{end}}{{if .Redis}}Redis{{end}} are{{else}} is{{end}} up{{if or .HasDB .Redis}}, 503 otherwise{{end}}. */
 @RestController
 public class HealthController {
-{{- if .HasDB}}
+{{- if or .HasDB .Redis}}
 
     private static final Logger LOG = LogManager.getLogger(HealthController.class);
+{{- if .HasDB}}
 
     private final JdbcTemplate jdbc;
+{{- end}}
+{{- if .Redis}}
 
-    public HealthController(JdbcTemplate jdbc) {
+    private final RedisConnectionFactory redis;
+{{- end}}
+
+    public HealthController({{if .HasDB}}JdbcTemplate jdbc{{end}}{{if and .HasDB .Redis}}, {{end}}{{if .Redis}}RedisConnectionFactory redis{{end}}) {
+{{- if .HasDB}}
         this.jdbc = jdbc;
+{{- end}}
+{{- if .Redis}}
+        this.redis = redis;
+{{- end}}
     }
 
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         try {
+{{- if .HasDB}}
             jdbc.queryForObject("SELECT 1", Integer.class);
+{{- end}}
+{{- if .Redis}}
+            try (RedisConnection c = redis.getConnection()) {
+                c.ping();
+            }
+{{- end}}
             return ResponseEntity.ok(Map.of("status", "ok"));
         } catch (DataAccessException e) {
             LOG.error("health check failed", e);

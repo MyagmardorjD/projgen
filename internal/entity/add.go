@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -50,6 +51,14 @@ type FieldData struct {
 	SQLType    string // DOUBLE PRECISION
 	Sample     string // Go literal used in tests
 	SampleJSON string // JSON literal used in tests
+
+	Java       string // unitPrice (record component)
+	JavaType   string // double (entity record)
+	JavaBoxed  string // Double (input record, null when absent)
+	JavaZero   string // value an absent input gets; empty when the field must be sent
+	JavaSample string // Java literal used in tests
+	JavaGet    string // ResultSet getter: getDouble
+	JavaParam  string // JDBC parameter for the input value: in.unitPrice()
 }
 
 // SQL holds pre-built SQL fragments for the repository template.
@@ -67,6 +76,7 @@ type Data struct {
 	SampleJSON    string // "name":"sample","price":9.5
 	SQL           SQL
 	MigrationsRel string // migrations folder relative to the repository package
+	HasTime       bool   // some field is a time
 }
 
 // Result lists what Add did.
@@ -77,6 +87,7 @@ type Result struct {
 	Manual   []string // wiring the developer must add by hand (no markers found)
 
 	AutoMigrate bool // the project applies migrations on start
+	Java        bool // the project is a Java (Spring Boot) project
 }
 
 type outFile struct {
@@ -88,13 +99,27 @@ type outFile struct {
 // Add generates the entity into the project at dir, which must contain the
 // project.yaml written by projgen.
 func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
+	return add(dir, spec, force, now, true)
+}
+
+// Preview reports what Add would create and change, without writing anything.
+func Preview(dir string, spec Spec, force bool, now time.Time) (Result, error) {
+	return add(dir, spec, force, now, false)
+}
+
+func add(dir string, spec Spec, force bool, now time.Time, write bool) (Result, error) {
 	var res Result
 	o, err := readProject(dir)
 	if err != nil {
 		return res, err
 	}
+	if o.Language == "java" {
+		if err := checkJava(spec); err != nil {
+			return res, err
+		}
+	}
 	d := newData(o, spec)
-	files := plan(d, now)
+	files := plan(d, migrationStamp(dir, d.Java, now))
 
 	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f.path))); err == nil && !f.shared && !force {
@@ -121,9 +146,28 @@ func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
 		}
 		rendered[f.path] = b
 	}
-	edits, manual, err := wiring(dir, d)
-	if err != nil {
-		return res, err
+	// Spring finds Java components by scanning, so only Go needs wiring.
+	var edits []edit
+	var manual []string
+	if !d.Java {
+		if edits, manual, err = wiring(dir, d); err != nil {
+			return res, err
+		}
+	}
+
+	res.AutoMigrate = o.HasExtra("migrations")
+	res.Java = d.Java
+	res.Manual = manual
+	if !write {
+		for _, f := range files {
+			if _, ok := rendered[f.path]; ok {
+				res.Created = append(res.Created, f.path)
+			}
+		}
+		for _, e := range edits {
+			res.Modified = append(res.Modified, e.path)
+		}
+		return res, nil
 	}
 
 	for _, f := range files {
@@ -146,8 +190,6 @@ func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
 		}
 		res.Modified = append(res.Modified, e.path)
 	}
-	res.Manual = manual
-	res.AutoMigrate = o.HasExtra("migrations")
 	return res, nil
 }
 
@@ -162,9 +204,6 @@ func readProject(dir string) (options.Options, error) {
 	}
 	if err := o.Validate(); err != nil {
 		return o, fmt.Errorf("project.yaml: %w", err)
-	}
-	if o.Language != "go" {
-		return o, fmt.Errorf("add entity supports Go projects only for now; this is a %s project", o.Language)
 	}
 	return o, nil
 }
@@ -182,8 +221,9 @@ func newData(o options.Options, s Spec) Data {
 		Plural: pascal(table),
 	}
 	pg := o.Database == "postgresql"
+	java := o.Language == "java"
 	ph := func(i int) string {
-		if pg {
+		if pg && !java { // JDBC always uses ?
 			return fmt.Sprintf("$%d", i)
 		}
 		return "?"
@@ -194,6 +234,13 @@ func newData(o options.Options, s Spec) Data {
 	for i, f := range s.Fields {
 		fd := FieldData{Field: f, Go: pascal(f.Name), JSON: f.Name, Column: f.Name}
 		fd.GoType, fd.SQLType, fd.Sample, fd.SampleJSON = typeInfo(f.Type, pg)
+		fd.Java = camel(f.Name)
+		fd.JavaType, fd.JavaBoxed, fd.JavaZero, fd.JavaSample, fd.JavaGet = javaTypeInfo(f.Type)
+		fd.JavaParam = "in." + fd.Java + "()"
+		if f.Type == "time" {
+			fd.JavaParam = "Timestamp.from(" + fd.JavaParam + ")"
+			d.HasTime = true
+		}
 		d.Fields = append(d.Fields, fd)
 		sel = append(sel, f.Name)
 		ins = append(ins, f.Name)
@@ -254,7 +301,63 @@ func typeInfo(t string, pg bool) (goType, sqlType, sample, sampleJSON string) {
 	panic("entity: unknown type " + t)
 }
 
-func plan(d Data, now time.Time) []outFile {
+// javaTypeInfo returns the entity type, input type, zero value, test sample
+// and ResultSet getter of a field type.
+func javaTypeInfo(t string) (typ, boxed, zero, sample, get string) {
+	switch t {
+	case "string":
+		return "String", "String", `""`, `"sample"`, "getString"
+	case "text":
+		return "String", "String", `""`, `"sample text"`, "getString"
+	case "int":
+		return "int", "Integer", "0", "1", "getInt"
+	case "int64":
+		return "long", "Long", "0L", "1L", "getLong"
+	case "float":
+		return "double", "Double", "0.0", "9.5", "getDouble"
+	case "bool":
+		return "boolean", "Boolean", "false", "true", "getBoolean"
+	case "time":
+		// There is no sensible zero time, so a time must always be sent.
+		return "Instant", "Instant", "", `Instant.parse("2026-01-02T15:04:05Z")`, "getTimestamp"
+	}
+	panic("entity: unknown type " + t)
+}
+
+// Names a Java entity or field cannot take: keywords, and classes the
+// generated code uses without a package.
+var (
+	javaKeywords = []string{"abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+		"continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "goto",
+		"if", "implements", "import", "instanceof", "int", "interface", "long", "native", "new", "package", "private",
+		"protected", "public", "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this",
+		"throw", "throws", "transient", "try", "void", "volatile", "while", "true", "false", "null", "var", "record",
+		"yield", "sealed", "permits", "when",
+		// Methods of java.lang.Object; a record component with these names would clash.
+		"hashCode", "toString", "getClass", "notify", "notifyAll", "wait", "clone", "finalize", "equals"}
+	javaClasses = []string{"String", "Object", "Integer", "Long", "Double", "Boolean", "Instant", "Timestamp", "List",
+		"Map", "ArrayList", "Override", "Record", "Exception", "RuntimeException", "Class", "System", "Math", "Void",
+		"Repository", "Service", "Test", "Optional", "Entity", "Validation", "NotFound"}
+)
+
+// checkJava rejects names that are valid for Go but not for Java.
+func checkJava(s Spec) error {
+	var errs []error
+	if slices.Contains(javaClasses, pascal(s.Name)) {
+		errs = append(errs, fmt.Errorf("entity name %q clashes with a Java class the generated code uses; choose another", s.Name))
+	}
+	for _, f := range s.Fields {
+		if slices.Contains(javaKeywords, camel(f.Name)) {
+			errs = append(errs, fmt.Errorf("field %q is reserved in Java; choose another", f.Name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func plan(d Data, stamp string) []outFile {
+	if d.Java {
+		return javaPlan(d, stamp)
+	}
 	p := d.P
 	fs := []outFile{
 		{p["domain"].Dir + "/errors.go", "errors.go.tmpl", true},
@@ -266,7 +369,6 @@ func plan(d Data, now time.Time) []outFile {
 		{p["http"].Dir + "/" + d.E.Snake + "_handler_test.go", "http/handler_test.go.tmpl", false},
 	}
 	if d.HasDB {
-		stamp := now.UTC().Format("20060102150405")
 		fs = append(fs,
 			outFile{p["db"].Dir + "/" + d.E.Snake + "_repository.go", "repo_sql.go.tmpl", false},
 			outFile{p["db"].Dir + "/" + d.E.Snake + "_repository_test.go", "repo_sql_test.go.tmpl", false},
@@ -275,6 +377,34 @@ func plan(d Data, now time.Time) []outFile {
 		)
 	} else {
 		fs = append(fs, outFile{p["db"].Dir + "/" + d.E.Snake + "_repository.go", "repo_memory.go.tmpl", false})
+	}
+	return fs
+}
+
+func javaPlan(d Data, stamp string) []outFile {
+	p, n := d.P, d.E.Name
+	fs := []outFile{
+		{p["domain"].Dir + "/NotFoundException.java", "java/NotFoundException.java.tmpl", true},
+		{p["domain"].Dir + "/ValidationException.java", "java/ValidationException.java.tmpl", true},
+		{p["domain"].Dir + "/" + n + ".java", "java/Entity.java.tmpl", false},
+		{p["domain"].Dir + "/" + n + "Input.java", "java/Input.java.tmpl", false},
+		{p["domain"].Dir + "/" + n + "Repository.java", "java/Repository.java.tmpl", false},
+		{p["service"].Dir + "/" + n + "Service.java", "java/Service.java.tmpl", false},
+		{p["service"].TestDir + "/" + n + "ServiceTest.java", "java/ServiceTest.java.tmpl", false},
+		{p["http"].Dir + "/EntityExceptionHandler.java", "java/EntityExceptionHandler.java.tmpl", true},
+		{p["http"].Dir + "/" + n + "Controller.java", "java/Controller.java.tmpl", false},
+		{p["http"].TestDir + "/" + n + "ControllerTest.java", "java/ControllerTest.java.tmpl", false},
+	}
+	if d.HasDB {
+		fs = append(fs,
+			outFile{p["db"].Dir + "/Jdbc" + n + "Repository.java", "java/JdbcRepository.java.tmpl", false},
+			outFile{p["db"].TestDir + "/Jdbc" + n + "RepositoryTest.java", "java/JdbcRepositoryTest.java.tmpl", false},
+			// Tests use an in-memory repository; in main it would clash with the JDBC bean.
+			outFile{p["db"].TestDir + "/InMemory" + n + "Repository.java", "java/InMemoryRepository.java.tmpl", false},
+			outFile{"src/main/resources/db/migration/V" + stamp + "__create_" + d.E.Table + ".sql", "migration.up.sql.tmpl", false},
+		)
+	} else {
+		fs = append(fs, outFile{p["db"].Dir + "/InMemory" + n + "Repository.java", "java/InMemoryRepository.java.tmpl", false})
 	}
 	return fs
 }
@@ -391,4 +521,33 @@ func addImport(src []byte, name, path string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+const stampLayout = "20060102150405"
+
+var (
+	goMigrationRe   = regexp.MustCompile(`^(\d{14})_`)
+	javaMigrationRe = regexp.MustCompile(`^V(\d{14})__`)
+)
+
+// migrationStamp returns the version for a new migration: now, or one second
+// after the newest existing migration when that is not older, so entities
+// added within the same second never share a version.
+func migrationStamp(dir string, java bool, now time.Time) string {
+	folder, re := "migrations", goMigrationRe
+	if java {
+		folder, re = filepath.Join("src", "main", "resources", "db", "migration"), javaMigrationRe
+	}
+	next := now.UTC().Truncate(time.Second)
+	entries, _ := os.ReadDir(filepath.Join(dir, folder))
+	for _, e := range entries {
+		m := re.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		if t, err := time.Parse(stampLayout, m[1]); err == nil && !t.Before(next) {
+			next = t.Add(time.Second)
+		}
+	}
+	return next.Format(stampLayout)
 }

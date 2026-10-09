@@ -4,40 +4,78 @@ import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-{{- if .HasDB}}
+{{- if or .HasDB .Redis}}
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 {{- end}}
 
 import org.junit.jupiter.api.Test;
-{{- if .HasDB}}
+{{- if or .HasDB .Redis}}
 import org.springframework.dao.DataAccessResourceFailureException;
+{{- end}}
+{{- if .Redis}}
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+{{- end}}
+{{- if .HasDB}}
 import org.springframework.jdbc.core.JdbcTemplate;
 {{- end}}
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class HealthControllerTest {
+{{- if or .HasDB .Redis}}
 {{- if .HasDB}}
 
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new HealthController(jdbc)).build();
+{{- end}}
+{{- if .Redis}}
+
+    private final RedisConnectionFactory redis = mock(RedisConnectionFactory.class);
+    private final RedisConnection connection = mock(RedisConnection.class);
+{{- end}}
+    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(
+            new HealthController({{if .HasDB}}jdbc{{end}}{{if and .HasDB .Redis}}, {{end}}{{if .Redis}}redis{{end}})).build();
+
+    private void allUp() {
+{{- if .HasDB}}
+        when(jdbc.queryForObject("SELECT 1", Integer.class)).thenReturn(1);
+{{- end}}
+{{- if .Redis}}
+        when(redis.getConnection()).thenReturn(connection);
+        when(connection.ping()).thenReturn("PONG");
+{{- end}}
+    }
 
     @Test
-    void databaseUp() throws Exception {
-        when(jdbc.queryForObject("SELECT 1", Integer.class)).thenReturn(1);
+    void up() throws Exception {
+        allUp();
         mvc.perform(get("/health"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("\"status\":\"ok\"")));
     }
+{{- if .HasDB}}
 
     @Test
     void databaseDown() throws Exception {
+        allUp();
         when(jdbc.queryForObject("SELECT 1", Integer.class)).thenThrow(new DataAccessResourceFailureException("down"));
         mvc.perform(get("/health"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().string(containsString("\"status\":\"unavailable\"")));
     }
+{{- end}}
+{{- if .Redis}}
+
+    @Test
+    void redisDown() throws Exception {
+        allUp();
+        when(redis.getConnection()).thenThrow(new DataAccessResourceFailureException("down"));
+        mvc.perform(get("/health"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().string(containsString("\"status\":\"unavailable\"")));
+    }
+{{- end}}
 {{- else}}
 
     private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new HealthController()).build();

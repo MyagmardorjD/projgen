@@ -265,12 +265,25 @@ func TestAdded_RealDatabase(t *testing.T) {
 	}
 }
 
-func TestAdd_JavaProjectNotSupportedYet(t *testing.T) {
-	o := options.Options{Name: "shop", Module: "com.techpartners.shop", Language: "java",
-		Framework: "spring-boot", Architecture: "clean", Database: "postgresql"}
+func TestPreview_WritesNothing(t *testing.T) {
+	o := combos()[1]
 	dir := newProject(t, o)
 	spec, _ := Parse("Product", testFields)
-	if _, err := Add(dir, spec, false, time.Now()); err == nil || !strings.Contains(err.Error(), "Go projects only") {
-		t.Fatalf("err = %v, want a not-supported error", err)
+	before, _ := os.ReadFile(filepath.Join(dir, "cmd", "server", "main.go"))
+	res, err := Preview(dir, spec, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Created) != 11 || len(res.Modified) != 2 {
+		t.Errorf("preview created = %d, modified = %v; want 11 and router.go, main.go", len(res.Created), res.Modified)
+	}
+	for _, f := range res.Created {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err == nil {
+			t.Errorf("preview wrote %s", f)
+		}
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "cmd", "server", "main.go"))
+	if string(before) != string(after) {
+		t.Error("preview changed main.go")
 	}
 }

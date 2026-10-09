@@ -1,0 +1,114 @@
+package {{.BasePkg}};
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+{{- if .Auth}}
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+{{- end}}
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+{{- if .Auth}}
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
+{{- end}}
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.test.context.SpringBootTest;
+
+/**
+ * Starts the real server on a random port and calls it over HTTP, so the
+ * whole filter chain runs:{{if .Auth}} bearer token checks{{end}}{{if and .Auth .Observability}} and{{end}}{{if .Observability}} /metrics{{end}}.
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+{{- if .HasDB}}
+        "spring.datasource.url=jdbc:{{if eq .Opt.Database "postgresql"}}postgresql{{else}}mysql{{end}}://127.0.0.1:1/none",
+{{- end}}
+{{- if .Migrations}}
+        "spring.flyway.enabled=false",
+{{- end}}
+{{- if .Auth}}
+        "app.jwt.secret=" + ServerTests.SECRET,
+{{- end}}
+{{- if .Redis}}
+        "spring.data.redis.url=redis://127.0.0.1:1",
+{{- end}}
+})
+class ServerTests {
+{{- if .Auth}}
+
+    /** A throwaway secret for tests only. */
+    static final String SECRET = "test-secret-0123456789-0123456789";
+{{- end}}
+
+    @Value("${local.server.port}")
+    private int port;
+
+    private final HttpClient http = HttpClient.newHttpClient();
+
+    private HttpResponse<String> get(String path, String token) throws IOException, InterruptedException {
+        HttpRequest.Builder req = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path));
+        if (token != null) {
+            req.header("Authorization", "Bearer " + token);
+        }
+        return http.send(req.build(), HttpResponse.BodyHandlers.ofString());
+    }
+{{- if .Auth}}
+
+    private static String token(String subject, String secret, Instant expires) throws JOSEException {
+        JWTClaimsSet claims = new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expires)).build();
+        SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+        jwt.sign(new MACSigner(secret.getBytes(StandardCharsets.UTF_8)));
+        return jwt.serialize();
+    }
+
+    @Test
+    void healthIsPublic() throws Exception {
+        assertThat(get("/health", null).statusCode()).isIn(200, 503);
+    }
+
+    @Test
+    void apiNeedsToken() throws Exception {
+        HttpResponse<String> res = get("/api/v1/hello", null);
+        assertThat(res.statusCode()).isEqualTo(401);
+        assertThat(res.headers().firstValue("WWW-Authenticate")).hasValueSatisfying(v -> assertThat(v).startsWith("Bearer"));
+    }
+
+    @Test
+    void rejectsBadTokens() throws Exception {
+        Instant later = Instant.now().plusSeconds(60);
+        assertThat(get("/api/v1/hello", "not-a-token").statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/hello", token("alice", "x".repeat(32), later)).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/hello", token("alice", SECRET, Instant.now().minusSeconds(3600))).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void acceptsValidToken() throws Exception {
+        String tok = token("alice", SECRET, Instant.now().plusSeconds(60));
+        HttpResponse<String> hello = get("/api/v1/hello", tok);
+        assertThat(hello.statusCode()).isEqualTo(200);
+        assertThat(hello.body()).contains("Hello, World!");
+        HttpResponse<String> me = get("/api/v1/me", tok);
+        assertThat(me.statusCode()).isEqualTo(200);
+        assertThat(me.body()).contains("\"subject\":\"alice\"");
+    }
+{{- end}}
+{{- if .Observability}}
+
+    @Test
+    void metricsArePublished() throws Exception {
+        get("/health", null);
+        HttpResponse<String> res = get("/metrics", null);
+        assertThat(res.statusCode()).isEqualTo(200);
+        assertThat(res.body()).contains("http_server_requests_seconds_count");
+    }
+{{- end}}
+}

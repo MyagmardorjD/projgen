@@ -1,0 +1,78 @@
+// Package cache stores JSON values in Redis with a time to live.
+//
+// Inject *Cache into a service and use it in front of slow reads:
+//
+//	var p domain.Product
+//	if ok, err := c.Get(ctx, key, &p); err == nil && ok {
+//		return p, nil
+//	}
+package cache
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// Cache is a JSON cache on Redis. It is safe for concurrent use.
+type Cache struct {
+	client *redis.Client
+	prefix string
+}
+
+// Open connects lazily to url (redis://user:password@host:6379/0 or rediss://
+// for TLS). Keys are prefixed with prefix + ":" so services can share a server.
+func Open(url, prefix string) (*Cache, error) {
+	opt, err := redis.ParseURL(url)
+	if err != nil {
+		return nil, fmt.Errorf("cache: REDIS_URL: %w", err)
+	}
+	return &Cache{client: redis.NewClient(opt), prefix: prefix + ":"}, nil
+}
+
+// PingContext lets /health check Redis.
+func (c *Cache) PingContext(ctx context.Context) error {
+	return c.client.Ping(ctx).Err()
+}
+
+// Get decodes the value of key into dst. ok is false when the key is missing.
+func (c *Cache) Get(ctx context.Context, key string, dst any) (ok bool, err error) {
+	b, err := c.client.Get(ctx, c.prefix+key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("cache get: %w", err)
+	}
+	if err := json.Unmarshal(b, dst); err != nil {
+		return false, fmt.Errorf("cache decode: %w", err)
+	}
+	return true, nil
+}
+
+// Set stores v as JSON under key for ttl.
+func (c *Cache) Set(ctx context.Context, key string, v any, ttl time.Duration) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("cache encode: %w", err)
+	}
+	if err := c.client.Set(ctx, c.prefix+key, b, ttl).Err(); err != nil {
+		return fmt.Errorf("cache set: %w", err)
+	}
+	return nil
+}
+
+// Delete removes key; a missing key is not an error.
+func (c *Cache) Delete(ctx context.Context, key string) error {
+	if err := c.client.Del(ctx, c.prefix+key).Err(); err != nil {
+		return fmt.Errorf("cache delete: %w", err)
+	}
+	return nil
+}
+
+// Close closes the connection pool.
+func (c *Cache) Close() error { return c.client.Close() }

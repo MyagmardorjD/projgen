@@ -5,36 +5,83 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+{{- if .Observability}}
+	"net/http"
+{{- end}}
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+{{- if .Observability}}
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
+{{- end}}
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"{{.P.domain.Import}}"
+{{- if .Auth}}
+	"{{.P.auth.Import}}"
+{{- end}}
 	"{{.P.logger.Import}}"
 	{{.P.service.Name}} "{{.P.service.Import}}"
+{{- if .Observability}}
+	"{{.P.telemetry.Import}}"
+{{- end}}
 )
 
 // HealthChecker is implemented by *sql.DB and anything else /health should ping.
 type HealthChecker interface {
 	PingContext(ctx context.Context) error
 }
+{{- if .Redis}}
+
+// HealthChecks pings every checker in order and returns the first error.
+type HealthChecks []HealthChecker
+
+func (hs HealthChecks) PingContext(ctx context.Context) error {
+	for _, h := range hs {
+		if err := h.PingContext(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+{{- end}}
 
 // Deps are the dependencies of the HTTP layer. Health may be nil.
 type Deps struct {
 	Greeter *{{.P.service.Name}}.Greeter
 	Health  HealthChecker
 	Logger  *slog.Logger
+{{- if .Auth}}
+	// Auth checks bearer tokens on /api/v1; nil turns authentication off (tests).
+	Auth *auth.Verifier
+{{- end}}
+{{- if .Observability}}
+	// Telemetry serves /metrics and traces requests; nil turns both off (tests).
+	Telemetry *telemetry.Telemetry
+{{- end}}
 	// projgen:deps (projgen add entity inserts fields here)
 }
 
 // NewRouter builds the Fiber app with all routes and middleware.
 func NewRouter(d Deps) *fiber.App {
 	app := fiber.New(fiber.Config{DisableStartupMessage: true, ReadTimeout: 10 * time.Second})
-	app.Use(recover.New(), requestLogger(d.Logger))
+	app.Use(recover.New(), requestLogger(d.Logger{{if .Observability}}, d.Telemetry{{end}}))
 	app.Get("/health", health(d))
+{{- if .Observability}}
+	if d.Telemetry != nil {
+		app.Get("/metrics", adaptor.HTTPHandler(d.Telemetry.MetricsHandler()))
+	}
+{{- end}}
 	v1 := app.Group("/api/v1")
+{{- if .Auth}}
+	if d.Auth != nil {
+		v1.Use(requireAuth(d.Auth))
+	}
+{{- end}}
 	v1.Get("/hello", hello(d))
+{{- if .Auth}}
+	v1.Get("/me", me)
+{{- end}}
 	// projgen:routes (projgen add entity inserts routes here)
 	return app
 }
@@ -52,18 +99,26 @@ func Serve(ctx context.Context, addr string, d Deps) error {
 	return app.ShutdownWithTimeout(10 * time.Second)
 }
 
-func requestLogger(base *slog.Logger) fiber.Handler {
+func requestLogger(base *slog.Logger{{if .Observability}}, tel *telemetry.Telemetry{{end}}) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
 		id := logger.RequestIDFrom(c.Get("X-Request-ID"))
 		c.Set("X-Request-ID", id)
+{{- if .Observability}}
+		ctx, end := tel.StartRequest(logger.WithRequestID(c.UserContext(), id), http.Header(c.GetReqHeaders()), c.Method())
+		c.SetUserContext(ctx)
+{{- else}}
 		c.SetUserContext(logger.WithRequestID(c.UserContext(), id))
+{{- end}}
 		err := c.Next()
 		if err != nil {
 			if herr := c.App().ErrorHandler(c, err); herr != nil {
 				_ = c.SendStatus(fiber.StatusInternalServerError)
 			}
 		}
+{{- if .Observability}}
+		end(c.Route().Path, c.Response().StatusCode())
+{{- end}}
 		logger.FromContext(c.UserContext(), base).Info("request completed",
 			"method", c.Method(),
 			"path", c.Route().Path,
@@ -73,6 +128,27 @@ func requestLogger(base *slog.Logger) fiber.Handler {
 	}
 }
 
+{{if .Auth -}}
+// requireAuth rejects requests without a valid bearer token with 401.
+func requireAuth(v *auth.Verifier) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		claims, err := v.Verify(c.Get("Authorization"))
+		if err != nil {
+			c.Set("WWW-Authenticate", "Bearer")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+		}
+		c.SetUserContext(auth.WithClaims(c.UserContext(), claims))
+		return c.Next()
+	}
+}
+
+// me returns who the bearer token belongs to.
+func me(c *fiber.Ctx) error {
+	claims, _ := auth.FromContext(c.UserContext())
+	return c.JSON(fiber.Map{"subject": claims.Subject})
+}
+
+{{end -}}
 func health(d Deps) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if d.Health != nil {

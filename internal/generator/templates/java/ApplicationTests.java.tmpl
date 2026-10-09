@@ -4,15 +4,28 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /** Starts the whole application context to check the wiring. */
+{{- if or .HasDB .Auth .Redis}}
 {{- if .HasDB}}
 // The pool connects lazily, so an unreachable database URL is enough here.
+{{- end}}
 {{- if .Migrations}}
 // Flyway would connect on start, so it is off; MigrationTests covers it.
 {{- end}}
+{{- if .Redis}}
+// Redis connects lazily too.
+{{- end}}
 @SpringBootTest(properties = {
+{{- if .HasDB}}
         "spring.datasource.url=jdbc:{{if eq .Opt.Database "postgresql"}}postgresql{{else}}mysql{{end}}://127.0.0.1:1/none",
+{{- end}}
 {{- if .Migrations}}
         "spring.flyway.enabled=false",
+{{- end}}
+{{- if .Auth}}
+        "app.jwt.secret=test-secret-0123456789-0123456789",
+{{- end}}
+{{- if .Redis}}
+        "spring.data.redis.url=redis://127.0.0.1:1",
 {{- end}}
 })
 {{- else}}

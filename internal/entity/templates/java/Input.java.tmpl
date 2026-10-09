@@ -1,0 +1,49 @@
+package {{.P.domain.Name}};
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+{{- if .HasTime}}
+import java.time.Instant;
+{{- end}}
+import java.util.ArrayList;
+import java.util.List;
+
+/** The fields a client sets when creating or updating a {{.E.Name}}. */
+public record {{.E.Name}}Input(
+{{- range $i, $f := .Fields}}{{if $i}},{{end}}
+        @JsonProperty("{{$f.JSON}}") {{$f.JavaBoxed}} {{$f.Java}}
+{{- end}}) {
+
+    /** Fields the client left out get their zero value{{if .HasTime}}; times must be sent{{end}}. */
+    public {{.E.Name}}Input {
+{{- range .Fields}}
+{{- if .JavaZero}}
+        if ({{.Java}} == null) {
+            {{.Java}} = {{.JavaZero}};
+        }
+{{- end}}
+{{- end}}
+    }
+
+    /** Returns every broken rule; empty when the input is valid. */
+    public List<String> problems() {
+        List<String> problems = new ArrayList<>();
+{{- range .Fields}}
+{{- if .Required}}
+        if ({{.Java}}.isBlank()) {
+            problems.add("{{.JSON}} is required");
+        }
+{{- end}}
+{{- if eq .Type "string"}}
+        if ({{.Java}}.codePointCount(0, {{.Java}}.length()) > 255) {
+            problems.add("{{.JSON}} must be at most 255 characters");
+        }
+{{- end}}
+{{- if eq .Type "time"}}
+        if ({{.Java}} == null) {
+            problems.add("{{.JSON}} is required");
+        }
+{{- end}}
+{{- end}}
+        return problems;
+    }
+}

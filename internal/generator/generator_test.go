@@ -74,7 +74,7 @@ func opts(fw, arch, db string, extras ...string) options.Options {
 	}
 }
 
-var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger"}
+var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger", "auth", "observability", "redis"}
 
 // extrasFor returns every extra valid for the database: migrations need one.
 func extrasFor(db string) []string {
@@ -164,6 +164,69 @@ func TestRender_ExtrasOnlyWhenChosen(t *testing.T) {
 	for _, p := range []string{"Dockerfile", "docker-compose.yml", ".gitlab-ci.yml", ".github/workflows/ci.yml", "docs/openapi.yaml", "internal/repository/db.go"} {
 		if _, ok := files[p]; ok {
 			t.Errorf("%s generated but not chosen", p)
+		}
+	}
+}
+
+// auth, observability and redis add their packages and modules only when chosen.
+func TestRender_AuthObservabilityRedis(t *testing.T) {
+	plain, err := Render(opts("echo", "clean", "postgresql"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := Render(opts("echo", "clean", "postgresql", "docker", "docker-compose", "swagger", "auth", "observability", "redis"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []string{"pkg/auth/auth.go", "cmd/token/main.go", "internal/repository/cache/cache.go", "pkg/telemetry/telemetry.go"}
+	modules := []string{versions.JWT, versions.Redis, versions.Prometheus, versions.Otel, versions.OtelSDK, versions.OtelOTLP}
+	for _, f := range files {
+		if _, ok := plain[f]; ok {
+			t.Errorf("%s generated without its extra", f)
+		}
+		if _, ok := all[f]; !ok {
+			t.Errorf("%s missing", f)
+		}
+	}
+	for _, m := range modules {
+		if strings.Contains(string(plain["go.mod"]), m) {
+			t.Errorf("go.mod requires %s without its extra", m)
+		}
+		if !strings.Contains(string(all["go.mod"]), m+" "+testV.Modules[m]) {
+			t.Errorf("go.mod does not require %s %s", m, testV.Modules[m])
+		}
+	}
+	checks := map[string][]string{
+		"cmd/server/main.go":               {"auth.NewVerifier(", "telemetry.SetupTracing(", "cache.Open(", "HealthChecks{conn, redisCache}"},
+		"internal/delivery/http/router.go": {"requireAuth(d.Auth)", "/metrics", `v1.GET("/me", me)`},
+		"docker-compose.yml":               {"image: redis:" + testV.Images["redis"], "JWT_SECRET: ${JWT_SECRET:?"},
+		".env.example":                     {"JWT_SECRET=\n", "REDIS_URL=", "OTEL_EXPORTER_OTLP_ENDPOINT="},
+		"docs/openapi.yaml":                {"bearerAuth"},
+	}
+	for f, wants := range checks {
+		for _, w := range wants {
+			if !strings.Contains(string(all[f]), w) {
+				t.Errorf("%s does not contain %q", f, w)
+			}
+		}
+	}
+
+	java, err := Render(javaOpts("clean", "postgresql", "auth", "observability", "redis"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pom := string(java["pom.xml"])
+	for _, w := range []string{"spring-boot-starter-security-oauth2-resource-server", "spring-boot-starter-opentelemetry",
+		"micrometer-registry-prometheus", "spring-boot-starter-data-redis"} {
+		if !strings.Contains(pom, w) {
+			t.Errorf("pom.xml missing %s", w)
+		}
+	}
+	base := "src/main/java/com/techpartners/orderservice"
+	for _, f := range []string{base + "/config/SecurityConfig.java", base + "/config/CacheConfig.java",
+		base + "/delivery/web/MeController.java", "src/test/java/com/techpartners/orderservice/ServerTests.java"} {
+		if _, ok := java[f]; !ok {
+			t.Errorf("missing %s", f)
 		}
 	}
 }
@@ -276,5 +339,30 @@ func TestGenerated_BuildAndTest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGenerated_RedisCache runs the generated cache tests against a real
+// Redis at PROJGEN_TEST_REDIS_URL (CI starts one as a service).
+func TestGenerated_RedisCache(t *testing.T) {
+	url := os.Getenv("PROJGEN_TEST_REDIS_URL")
+	if url == "" {
+		t.Skip("set PROJGEN_TEST_REDIS_URL to test the generated cache against a real Redis")
+	}
+	dir := t.TempDir()
+	if _, err := Generate(opts("gin", "layered", "none", "redis"), testV, dir, Flags{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"mod", "tidy"}, {"test", "-count=1", "-run", "TestCache", "-v", "./internal/cache/"}} {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "TEST_REDIS_URL="+url)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		if args[0] == "test" && strings.Contains(string(out), "SKIP") {
+			t.Fatalf("cache test skipped:\n%s", out)
+		}
 	}
 }

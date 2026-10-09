@@ -14,9 +14,26 @@
 
 ## Суулгах
 
+Go суулгасан бол:
+
 ```bash
 go install github.com/MyagmardorjD/projgen@latest
 ```
+
+Go-гүй бол (жишээ нь Java баг) [Releases](https://github.com/MyagmardorjD/projgen/releases/latest) хуудаснаас өөрийн платформын архивыг (Windows: `projgen_<хувилбар>_windows_amd64.zip`, Linux/macOS: `.tar.gz`, amd64/arm64) татаж задлаад `projgen`-ийг PATH-д хийнэ. `checksums.txt`-ээр шалгаж болно.
+
+`projgen version` нь хувилбараа хэвлэж, шинэ release гарсан бол мэдэгдэнэ (`--offline` бол шалгахгүй). `projgen update` ч мөн шалгана.
+
+### Release гаргах
+
+`v` угтвартай tag push хийхэд `.github/workflows/release.yml` GoReleaser-ээр Windows, Linux, macOS (amd64, arm64)-ийн binary, checksum, changelog-той GitHub release үүсгэнэ:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Нийтлэхгүйгээр локалаар шалгах: `goreleaser release --snapshot --clean` (үр дүн `dist/`-д).
 
 ## Вэб интерфейс
 
@@ -30,6 +47,7 @@ projgen serve
 2. **Компьютер дээр үүсгэх** дарвал сонгосон хавтсанд (анхдагч `~/source/repos`) үүсгээд `go mod tidy`, `git init` хийнэ. Дараа нь VS Code эсвэл Explorer-оор нээж болно.
 3. Эсвэл **ZIP татах** дарж архиваар авна.
 4. **Шинэчлэх** нь технологийн хувилбаруудыг албан ёсны эх сурвалжаас дахин шалгана.
+5. **Entity нэмэх** хэсэгт төслийн хавтас, entity-ийн нэр, талбаруудыг (нэр, төрөл, required) оруулна. **Урьдчилан харах** нь юу үүсэх, юу өөрчлөгдөхийг юу ч бичихгүйгээр харуулна; **Entity нэмэх** нь `projgen add entity`-тэй ижлээр (Go, Java аль алинд) бичнэ. Төсөл үүсгэсний дараа хавтас нь автоматаар бөглөгдөнө.
 
 Сервер зөвхөн `127.0.0.1` дээр сонсоно. Өөр вэбсайт таны дискэнд файл бичүүлэхээс хамгаалж, хүсэлт бүр хуудсанд суулгасан токен болон Host-ыг шалгадаг. `--port`, `--no-browser`, `--offline` flag-тай.
 
@@ -54,10 +72,18 @@ language: go
 framework: gin            # gin | echo | fiber | nethttp
 architecture: clean       # layered | clean | hexagonal
 database: postgresql      # postgresql | mysql | none
-extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions
+extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions, auth, observability, redis
 ```
 
 `migrations` (DB сонгосон үед): асахдаа migration-ийг автоматаар ажиллуулна. Go: `migrations/*.sql`-ийг binary-д суулгаж golang-migrate-ээр, Java: `db/migration/V*.sql`-ийг Flyway-ээр. `MIGRATE_ON_START=false` гэж унтраана. `projgen add entity`-ийн migration ч дараагийн асалтад автоматаар ажиллана.
+
+| Нэмэлт | Go | Java (Spring Boot) |
+| --- | --- | --- |
+| `auth` | `/api/v1/*` бүхэлдээ `Authorization: Bearer <JWT>` шаардана (HS256, `sub`+`exp` заавал, `JWT_SECRET` ≥ 32 байт, `JWT_ISSUER`/`JWT_AUDIENCE` сонголттой). golang-jwt, `GET /api/v1/me`, хөгжүүлэлтийн token: `go run ./cmd/token -sub alice` | Spring Security resource server (`SecurityConfig`), `MeController`, бодит сервер дээрх `ServerTests` |
+| `observability` | `GET /metrics` (Prometheus: `http_request_duration_seconds{method,route,status}` + Go runtime), хүсэлт бүрт OpenTelemetry span (`traceparent` үргэлжилнэ), логт `trace_id`/`span_id`. `OTEL_EXPORTER_OTLP_ENDPOINT` өгвөл OTLP/HTTP-ээр илгээнэ | Actuator + Micrometer: `GET /metrics`, OpenTelemetry tracing (`TRACING_EXPORT_ENABLED=true` үед илгээнэ), логт `trace_id`/`span_id` |
+| `redis` | `cache` пакет (go-redis: JSON `Get`/`Set`/`Delete`, TTL, үйлчилгээний нэрийн угтвар), `/health` Redis-ийг ping хийнэ, `TEST_REDIS_URL`-тэй тест | Spring Data Redis + `@EnableCaching` (`@Cacheable`, `CACHE_TTL`), `/health` Redis-ийг ping хийнэ |
+
+`/health` болон `/metrics` нийтэд нээлттэй хэвээр. Нууц утгуудад анхдагч утга байхгүй (docker-compose ч `JWT_SECRET`-ийг `.env`-ээс шаардана). docker-compose сонгосон бол `redis` service нэмэгдэнэ.
 
 Java төслийн хувьд:
 
@@ -118,9 +144,9 @@ module_prefix: gitlab.techpartners.asia/backend   # module = <prefix>/<нэр>
 projgen add entity Product name:string:required description:text price:float stock:int active:bool released_at:time
 ```
 
-Одоогоор зөвхөн Go төсөлд. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ.
+Go болон Java төсөлд ажиллана. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ. Нэг секундэд хэд хэдэн entity нэмсэн ч migration-ий хувилбар давхцахгүй.
 
-`project.yaml`-аас бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ:
+`project.yaml`-аас хэл, бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ. Go төсөлд:
 
 | Файл | Агуулга |
 | --- | --- |
@@ -133,7 +159,22 @@ projgen add entity Product name:string:required description:text price:float sto
 
 `router.go`, `main.go` дахь `// projgen:` тэмдэгтэй мөрийн өмнө шинэ entity-г автоматаар холбоно. Тэмдэггүй хуучин төсөлд юуг гараар нэмэхийг хэвлэнэ. Байгаа entity-г дахин үүсгэхэд `--force` хэрэгтэй.
 
-Алдааны хариу: шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`.
+Java (Spring Boot) төсөлд:
+
+| Файл | Агуулга |
+| --- | --- |
+| domain `Product.java`, `ProductInput.java`, `ProductRepository.java` | record-ууд (JSON нь `snake_case`), шалгалт, repository interface |
+| domain `NotFoundException.java`, `ValidationException.java` | Бүх entity-д нэг удаа үүснэ |
+| service `ProductService.java` + тест | Бизнес дүрэм, хуудаслалт (анхдагч 20, дээд тал 100) |
+| repository `JdbcProductRepository.java` | `JdbcClient`-ээр PostgreSQL/MySQL, DB-гүй бол `InMemoryProductRepository` |
+| repository `JdbcProductRepositoryTest.java` | `TEST_DATABASE_URL` (JDBC) өгвөл жинхэнэ DB дээр CRUD шалгана |
+| web `ProductController.java` + MockMvc тест | Go-тай ижил endpoint-ууд |
+| web `EntityExceptionHandler.java` | `404` / `422` / `400` хариуг `ApiExceptionHandler`-ээс өмнө буцаана |
+| `db/migration/V<огноо>__create_products.sql` | Flyway migration (`migrations` сонгосон бол асахдаа автоматаар) |
+
+Spring component scan хийдэг тул юу ч гараар холбох шаардлагагүй. Java-гийн түлхүүр үг (`class`, `new` г.м.) болон `String`, `List` зэрэг класстай давхцах нэрийг хүлээж авахгүй. Хоосон ирсэн тоо, bool талбар 0/false болно, `time` талбарыг заавал илгээнэ.
+
+Алдааны хариу (хоёр хэлэнд ижил): шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`.
 
 ## Технологийн хувилбарууд
 
@@ -175,5 +216,5 @@ PROJGEN_E2E=1 go test ./internal/generator -run BuildAndTest -timeout 30m
 | Workflow | Хэзээ | Юу хийдэг |
 | --- | --- | --- |
 | `ci.yml` | push, PR бүрт | gofmt, go vet, go test (Ubuntu + Windows), race detector |
-| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. 9 Java хослолыг `mvnw verify`-ээр шалгана. Эвдэрвэл issue нээнэ |
+| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. 9 Java хослолыг entity-тэй болон entity-гүйгээр `mvnw verify`-ээр, Java-гийн JDBC repository-г жинхэнэ DB дээр шалгана. Эвдэрвэл issue нээнэ |
 | Dependabot | 7 хоног бүр | projgen-ий Go dependency, Actions-ийн хувилбарыг шинэчлэх PR |

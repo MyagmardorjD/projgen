@@ -40,10 +40,21 @@ const (
 	Pgx     = "github.com/jackc/pgx/v5"
 	MySQL   = "github.com/go-sql-driver/mysql"
 	Migrate = "github.com/golang-migrate/migrate/v4"
+
+	JWT        = "github.com/golang-jwt/jwt/v5"
+	Redis      = "github.com/redis/go-redis/v9"
+	Prometheus = "github.com/prometheus/client_golang"
+	Otel       = "go.opentelemetry.io/otel"
+	OtelSDK    = "go.opentelemetry.io/otel/sdk"
+	OtelTrace  = "go.opentelemetry.io/otel/trace"
+	OtelOTLP   = "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 )
 
 // Modules lists every tracked Go module.
-var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL, Migrate}
+var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL, Migrate, JWT, Redis, Prometheus, Otel, OtelSDK, OtelTrace, OtelOTLP}
+
+// AlpineImages lists the official Docker images tracked by their newest "<major>-alpine" tag.
+var AlpineImages = []string{"postgres", "redis"}
 
 // Actions lists every tracked GitHub Action.
 var Actions = []string{"actions/checkout", "actions/setup-go", "actions/setup-java"}
@@ -223,7 +234,9 @@ func (f *Fetcher) Fetch(ctx context.Context) (Versions, error) {
 	for _, m := range Modules {
 		do(m, func() (string, error) { return f.moduleVersion(ctx, m) }, func(s string) { v.Modules[m] = s })
 	}
-	do("postgres image", func() (string, error) { return f.postgresTag(ctx) }, func(s string) { v.Images["postgres"] = s })
+	for _, img := range AlpineImages {
+		do(img+" image", func() (string, error) { return f.majorAlpineTag(ctx, img) }, func(s string) { v.Images[img] = s })
+	}
 	do("mysql image", func() (string, error) { return f.mysqlLTSTag(ctx) }, func(s string) { v.Images["mysql"] = s })
 	for _, a := range Actions {
 		do(a, func() (string, error) { return f.actionMajor(ctx, a) }, func(s string) { v.Actions[a] = s })
@@ -234,7 +247,7 @@ func (f *Fetcher) Fetch(ctx context.Context) (Versions, error) {
 	}
 	wg.Wait()
 
-	if len(errs) < 1+len(Modules)+2+len(Actions)+1+len(JavaArtifacts) {
+	if len(errs) < 1+len(Modules)+len(AlpineImages)+1+len(Actions)+1+len(JavaArtifacts) {
 		v.FetchedAt = time.Now().UTC()
 	}
 	slices.SortFunc(errs, func(a, b error) int { return strings.Compare(a.Error(), b.Error()) })
@@ -311,17 +324,17 @@ func (f *Fetcher) hubTags(ctx context.Context, image, filter string) ([]hubTag, 
 	return page.Results, err
 }
 
-var pgAlpineRe = regexp.MustCompile(`^(\d+)-alpine$`)
+var majorAlpineRe = regexp.MustCompile(`^(\d+)-alpine$`)
 
-// postgresTag returns the newest stable "<major>-alpine" tag of the official image.
-func (f *Fetcher) postgresTag(ctx context.Context) (string, error) {
-	tags, err := f.hubTags(ctx, "postgres", "alpine")
+// majorAlpineTag returns the newest stable "<major>-alpine" tag of an official image.
+func (f *Fetcher) majorAlpineTag(ctx context.Context, image string) (string, error) {
+	tags, err := f.hubTags(ctx, image, "alpine")
 	if err != nil {
 		return "", err
 	}
 	best := -1
 	for _, t := range tags {
-		if m := pgAlpineRe.FindStringSubmatch(t.Name); m != nil {
+		if m := majorAlpineRe.FindStringSubmatch(t.Name); m != nil {
 			if n, _ := strconv.Atoi(m[1]); n > best {
 				best = n
 			}
@@ -426,4 +439,23 @@ func (f *Fetcher) mavenRelease(ctx context.Context, path string) (string, error)
 		return "", errors.New("no stable version listed")
 	}
 	return fmt.Sprintf("%d.%d.%d", best[0], best[1], best[2]), nil
+}
+
+// ProjgenRepo is the GitHub repository projgen is released from.
+const ProjgenRepo = "MyagmardorjD/projgen"
+
+var releaseTagRe = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
+// LatestProjgen returns the tag of projgen's latest GitHub release ("v0.2.0").
+func (f *Fetcher) LatestProjgen(ctx context.Context) (string, error) {
+	var rel struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := f.getJSON(ctx, f.GitHub+"/repos/"+ProjgenRepo+"/releases/latest", &rel); err != nil {
+		return "", err
+	}
+	if !releaseTagRe.MatchString(rel.TagName) {
+		return "", fmt.Errorf("unexpected tag %q", rel.TagName)
+	}
+	return rel.TagName, nil
 }

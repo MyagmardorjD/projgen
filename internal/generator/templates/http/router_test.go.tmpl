@@ -9,8 +9,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+{{- if .Auth}}
+	"time"
+{{- end}}
 
+{{- if .Auth}}
+	"{{.P.auth.Import}}"
+{{- end}}
 	{{.P.service.Name}} "{{.P.service.Import}}"
+{{- if .Observability}}
+	"{{.P.telemetry.Import}}"
+{{- end}}
 )
 
 type fakeHealth struct{ err error }
@@ -84,3 +93,63 @@ func TestRequestID(t *testing.T) {
 		t.Errorf("X-Request-ID = %q, want a generated 32-char id", h.Get("X-Request-ID"))
 	}
 }
+{{- if .Auth}}
+
+func TestAuth(t *testing.T) {
+	const secret = "test-secret-0123456789-0123456789" // throwaway, tests only
+	v, err := auth.NewVerifier(secret, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := testDeps(nil)
+	d.Auth = v
+	tok, err := auth.Sign(secret, "alice", "", "", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		path       string
+		header     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"health is public", "/health", "", http.StatusOK, `"status":"ok"`},
+		{"no token", "/api/v1/hello", "", http.StatusUnauthorized, `"error":"unauthorized"`},
+		{"bad token", "/api/v1/hello", "Bearer nope", http.StatusUnauthorized, `"error":"unauthorized"`},
+		{"valid token", "/api/v1/hello", "Bearer " + tok, http.StatusOK, "Hello, World!"},
+		{"me", "/api/v1/me", "Bearer " + tok, http.StatusOK, `"subject":"alice"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+			status, body, h := do(t, d, req)
+			if status != tt.wantStatus || !strings.Contains(body, tt.wantBody) {
+				t.Errorf("status = %d, body = %s; want %d containing %s", status, body, tt.wantStatus, tt.wantBody)
+			}
+			if status == http.StatusUnauthorized && h.Get("WWW-Authenticate") != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q, want Bearer", h.Get("WWW-Authenticate"))
+			}
+		})
+	}
+}
+{{- end}}
+{{- if .Observability}}
+
+func TestMetrics(t *testing.T) {
+	d := testDeps(nil)
+	d.Telemetry = telemetry.New("test")
+	do(t, d, httptest.NewRequest(http.MethodGet, "/api/v1/hello", nil))
+	status, body, _ := do(t, d, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if status != http.StatusOK {
+		t.Fatalf("GET /metrics = %d", status)
+	}
+	want := `http_request_duration_seconds_count{method="GET",route="/api/v1/hello",status="200"} 1`
+	if !strings.Contains(body, want) {
+		t.Errorf("metrics missing %s:\n%s", want, body)
+	}
+}
+{{- end}}

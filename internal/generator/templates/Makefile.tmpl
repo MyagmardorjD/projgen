@@ -1,4 +1,4 @@
-.PHONY: run build test cover vet tidy{{if .Opt.HasExtra "docker-compose"}} up down{{end}}
+.PHONY: run build test cover vet tidy{{if .Auth}} token{{end}}{{if .Opt.HasExtra "docker-compose"}} up down{{end}}
 
 run:
 	go run ./cmd/server
@@ -17,6 +17,12 @@ vet:
 
 tidy:
 	go mod tidy
+{{- if .Auth}}
+
+# A development token signed with JWT_SECRET: make token SUB=alice
+token:
+	@go run ./cmd/token -sub $(or $(SUB),dev-user)
+{{- end}}
 {{- if .Opt.HasExtra "docker-compose"}}
 
 up:

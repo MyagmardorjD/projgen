@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/MyagmardorjD/projgen/internal/create"
+	"github.com/MyagmardorjD/projgen/internal/entity"
 	"github.com/MyagmardorjD/projgen/internal/generator"
 	"github.com/MyagmardorjD/projgen/internal/options"
 	"github.com/MyagmardorjD/projgen/internal/preset"
@@ -89,6 +90,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/update", s.update)
 	mux.HandleFunc("POST /api/open", s.open)
 	mux.HandleFunc("POST /api/presets", s.savePreset)
+	mux.HandleFunc("POST /api/entity/preview", s.entityPreview)
+	mux.HandleFunc("POST /api/entity", s.entityAdd)
 	return s.guard(mux)
 }
 
@@ -141,6 +144,7 @@ func rows(v versions.Versions) versionsResp {
 	}
 	add("postgres image", v.Images["postgres"], "Docker Hub")
 	add("mysql LTS image", v.Images["mysql"], "Docker Hub")
+	add("redis image", v.Images["redis"], "Docker Hub")
 	for _, a := range versions.Actions {
 		add(a, v.Actions[a], "GitHub")
 	}
@@ -169,6 +173,7 @@ func (s *Server) options(w http.ResponseWriter, _ *http.Request) {
 		"separator":      string(filepath.Separator),
 		"versions":       rows(s.current()),
 		"presets":        presets,
+		"field_types":    strings.Split(entity.TypeNames, ", "),
 	}
 	if err != nil {
 		resp["preset_warning"] = err.Error()
@@ -322,6 +327,95 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		"warnings": warnings,
 		"log":      log.String(),
 		"has_code": hasCode == nil,
+	})
+}
+
+type entityRequest struct {
+	Dir    string `json:"dir"`
+	Name   string `json:"name"`
+	Fields []struct {
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Required bool   `json:"required"`
+	} `json:"fields"`
+	Force bool `json:"force"`
+}
+
+// decodeEntity reads an entity request, answering 400 itself. The fields go
+// through the same parser as "projgen add entity".
+func decodeEntity(w http.ResponseWriter, r *http.Request) (dir string, spec entity.Spec, force, ok bool) {
+	var req entityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrors(w, http.StatusBadRequest, errors.New("invalid request body"))
+		return "", spec, false, false
+	}
+	if strings.TrimSpace(req.Dir) == "" {
+		writeErrors(w, http.StatusBadRequest, errors.New("choose the project folder"))
+		return "", spec, false, false
+	}
+	dir, err := filepath.Abs(prompt.ExpandHome(strings.TrimSpace(req.Dir)))
+	if err != nil {
+		writeErrors(w, http.StatusBadRequest, err)
+		return "", spec, false, false
+	}
+	args := make([]string, 0, len(req.Fields))
+	for _, f := range req.Fields {
+		a := strings.TrimSpace(f.Name) + ":" + f.Type
+		if f.Required {
+			a += ":required"
+		}
+		args = append(args, a)
+	}
+	spec, err = entity.Parse(strings.TrimSpace(req.Name), args)
+	if err != nil {
+		writeErrors(w, http.StatusBadRequest, err)
+		return "", spec, false, false
+	}
+	return dir, spec, req.Force, true
+}
+
+func (s *Server) entityPreview(w http.ResponseWriter, r *http.Request) {
+	dir, spec, force, ok := decodeEntity(w, r)
+	if !ok {
+		return
+	}
+	res, err := entity.Preview(dir, spec, force, time.Now())
+	writeEntity(w, dir, res, err)
+}
+
+func (s *Server) entityAdd(w http.ResponseWriter, r *http.Request) {
+	dir, spec, force, ok := decodeEntity(w, r)
+	if !ok {
+		return
+	}
+	res, err := entity.Add(dir, spec, force, time.Now())
+	writeEntity(w, dir, res, err)
+}
+
+func writeEntity(w http.ResponseWriter, dir string, res entity.Result, err error) {
+	switch {
+	case errors.Is(err, entity.ErrExists):
+		writeErrors(w, http.StatusConflict, err)
+		return
+	case err != nil:
+		// Not a project, bad project.yaml or a name Java cannot use: the developer can fix it.
+		writeErrors(w, http.StatusBadRequest, err)
+		return
+	}
+	nonNil := func(s []string) []string {
+		if s == nil {
+			return []string{}
+		}
+		return s
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dir":          dir,
+		"created":      nonNil(res.Created),
+		"modified":     nonNil(res.Modified),
+		"skipped":      nonNil(res.Skipped),
+		"manual":       nonNil(res.Manual),
+		"auto_migrate": res.AutoMigrate,
+		"java":         res.Java,
 	})
 }
 

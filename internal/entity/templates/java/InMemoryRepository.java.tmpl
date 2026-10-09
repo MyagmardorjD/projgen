@@ -1,0 +1,64 @@
+package {{.P.db.Name}};
+
+import {{.P.domain.Name}}.NotFoundException;
+import {{.P.domain.Name}}.{{.E.Name}};
+import {{.P.domain.Name}}.{{.E.Name}}Input;
+import {{.P.domain.Name}}.{{.E.Name}}Repository;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicLong;
+{{- if not .HasDB}}
+import org.springframework.stereotype.Repository;
+{{- end}}
+
+/** Keeps {{.E.Table}} in memory{{if .HasDB}}, for tests{{else}}; the data is lost on restart{{end}}. */
+{{- if not .HasDB}}
+@Repository
+{{- end}}
+public class InMemory{{.E.Name}}Repository implements {{.E.Name}}Repository {
+
+    private final ConcurrentSkipListMap<Long, {{.E.Name}}> rows = new ConcurrentSkipListMap<>();
+    private final AtomicLong lastId = new AtomicLong();
+
+    @Override
+    public {{.E.Name}} create({{.E.Name}}Input in) {
+        long id = lastId.incrementAndGet();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        {{.E.Name}} x = new {{.E.Name}}(id{{range .Fields}}, in.{{.Java}}(){{end}}, now, now);
+        rows.put(id, x);
+        return x;
+    }
+
+    @Override
+    public {{.E.Name}} get(long id) {
+        {{.E.Name}} x = rows.get(id);
+        if (x == null) {
+            throw new NotFoundException();
+        }
+        return x;
+    }
+
+    @Override
+    public List<{{.E.Name}}> list(int limit, int offset) {
+        return rows.values().stream().skip(offset).limit(limit).toList();
+    }
+
+    @Override
+    public {{.E.Name}} update(long id, {{.E.Name}}Input in) {
+        {{.E.Name}} x = rows.computeIfPresent(id, (k, old) -> new {{.E.Name}}(k{{range .Fields}}, in.{{.Java}}(){{end}},
+                old.createdAt(), Instant.now().truncatedTo(ChronoUnit.MICROS)));
+        if (x == null) {
+            throw new NotFoundException();
+        }
+        return x;
+    }
+
+    @Override
+    public void delete(long id) {
+        if (rows.remove(id) == null) {
+            throw new NotFoundException();
+        }
+    }
+}

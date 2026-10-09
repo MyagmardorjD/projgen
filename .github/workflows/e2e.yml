@@ -68,11 +68,22 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval 5s --health-timeout 3s --health-retries 30
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      - name: Generated cache against a real Redis
+        env:
+          PROJGEN_TEST_REDIS_URL: redis://localhost:6379/0
+        run: go test -count=1 -run TestGenerated_RedisCache -v -timeout 10m ./internal/generator
 
       - name: Generated repositories against real databases
         env:
@@ -128,7 +139,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: go test -count=1 -run TestGeneratedJava_BuildAndTest -timeout 40m ./internal/generator
 
-      - name: Flyway migrations against real databases
+      - name: Build and test Java projects with entities
+        env:
+          PROJGEN_E2E_JAVA: "1"
+        run: go test -count=1 -run TestAddedJava_BuildAndTest -timeout 40m ./internal/entity
+
+      - name: Flyway migrations and JDBC repositories against real databases
         env:
           PROJGEN_E2E_JAVA: "1"
           # Throwaway credentials of the CI service containers above.
@@ -136,7 +152,9 @@ jobs:
           PROJGEN_TEST_MYSQL_JDBC: jdbc:mysql://localhost:3306/app
           PROJGEN_TEST_DB_USER: app
           PROJGEN_TEST_DB_PASSWORD: app
-        run: go test -count=1 -run TestGeneratedJava_RealDatabase -v -timeout 20m ./internal/generator
+        run: |
+          go test -count=1 -run TestGeneratedJava_RealDatabase -v -timeout 20m ./internal/generator
+          go test -count=1 -run TestAddedJava_RealDatabase -v -timeout 20m ./internal/entity
 
   report:
     needs: [generated, database, java]

@@ -20,9 +20,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 
 	"github.com/MyagmardorjD/projgen/internal/create"
@@ -41,7 +43,23 @@ const refreshAfter = 24 * time.Hour
 // newFetcher is replaced in tests.
 var newFetcher = versions.NewFetcher
 
-const version = "0.1.0"
+// version and commit are set by GoReleaser (-X main.version=... -X main.commit=...).
+// A "go install ...@vX.Y.Z" build reads its version from the build info instead.
+var (
+	version = ""
+	commit  = ""
+)
+
+// buildVersion returns projgen's version without a leading v, or "dev".
+func buildVersion() string {
+	if version != "" {
+		return strings.TrimPrefix(version, "v")
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return "dev"
+}
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -72,9 +90,8 @@ func run(args []string, in io.Reader, out io.Writer) error {
 	case "versions":
 		cmdVersions(out)
 		return nil
-	case "version":
-		fmt.Fprintln(out, "projgen", version)
-		return nil
+	case "version", "--version":
+		return cmdVersion(args[1:], out)
 	case "help", "-h", "--help":
 		usage(out)
 		return nil
@@ -98,7 +115,8 @@ Usage:
   projgen list          show supported languages, frameworks, architectures, databases, extras
   projgen update        fetch the latest versions from official sources
   projgen versions      show the versions new projects will use
-  projgen version
+  projgen version [--offline]
+                        show the version and whether a newer release exists
 
 Flags for new:
   --preset NAME   start from a preset; asks only name, module and location
@@ -343,7 +361,7 @@ func cmdAdd(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "\nNext steps:")
 	for _, f := range res.Created {
-		if !strings.HasSuffix(f, ".up.sql") {
+		if !strings.HasSuffix(f, ".up.sql") && !strings.HasPrefix(f, "src/main/resources/db/migration/") {
 			continue
 		}
 		if res.AutoMigrate {
@@ -351,6 +369,10 @@ func cmdAdd(args []string, out io.Writer) error {
 		} else {
 			fmt.Fprintf(out, "  apply the migration: %s\n", f)
 		}
+	}
+	if res.Java {
+		fmt.Fprintln(out, "  ./mvnw verify            (Windows: mvnw.cmd verify)")
+		return nil
 	}
 	fmt.Fprintln(out, "  go test ./...")
 	return nil
@@ -429,11 +451,48 @@ func refresh(old versions.Versions) (versions.Versions, error) {
 	return v, fetchErr
 }
 
+func cmdVersion(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(out)
+	offline := fs.Bool("offline", false, "")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	line := "projgen " + buildVersion()
+	if commit != "" {
+		line += " (" + commit + ")"
+	}
+	fmt.Fprintln(out, line)
+	if !*offline {
+		checkSelf(out)
+	}
+	return nil
+}
+
+// checkSelf tells the developer when a newer projgen release exists. It is
+// a hint only, so a failed check prints nothing.
+func checkSelf(out io.Writer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	latest, err := newFetcher().LatestProjgen(ctx)
+	if err != nil {
+		return
+	}
+	cur := "v" + buildVersion()
+	if semver.IsValid(cur) && semver.Compare(cur, latest) >= 0 {
+		fmt.Fprintln(out, "This is the latest release.")
+		return
+	}
+	fmt.Fprintf(out, "projgen %s is available. Update with:\n  go install github.com/%s@latest\nor download it from https://github.com/%s/releases/latest\n",
+		latest, versions.ProjgenRepo, versions.ProjgenRepo)
+}
+
 func cmdUpdate(out io.Writer) error {
 	old, _ := versions.Load()
 	fmt.Fprintln(out, "Checking latest versions from official sources...")
 	v, err := refresh(old)
 	printVersions(out, old, v)
+	checkSelf(out)
 	if err != nil {
 		return fmt.Errorf("some versions could not be checked (saved ones kept):\n%w", err)
 	}
@@ -467,6 +526,7 @@ func printVersions(out io.Writer, old, cur versions.Versions) {
 	}
 	row("postgres (docker image)", "Docker Hub", old.Images["postgres"], cur.Images["postgres"])
 	row("mysql LTS (docker image)", "Docker Hub", old.Images["mysql"], cur.Images["mysql"])
+	row("redis (docker image)", "Docker Hub", old.Images["redis"], cur.Images["redis"])
 	for _, a := range versions.Actions {
 		row(a, "GitHub", old.Actions[a], cur.Actions[a])
 	}

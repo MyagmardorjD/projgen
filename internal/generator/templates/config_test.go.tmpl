@@ -1,9 +1,29 @@
+{{- /* Required variables every valid case sets; test values only. */ -}}
+{{- $req := "" -}}
+{{- if .HasDB}}{{$req = printf "%s\"DATABASE_URL\": \"test-dsn\", " $req}}{{end -}}
+{{- if .Auth}}{{$req = printf "%s\"JWT_SECRET\": testSecret, " $req}}{{end -}}
+{{- if .Redis}}{{$req = printf "%s\"REDIS_URL\": \"redis://localhost:6379/0\", " $req}}{{end -}}
 package config
 
 import (
 	"strings"
 	"testing"
 )
+{{- if .Auth}}
+
+// testSecret is a throwaway value for tests only.
+const testSecret = "test-secret-0123456789-0123456789"
+{{- end}}
+
+// valid returns the variables a valid configuration needs, with overrides
+// given as key, value pairs.
+func valid(kv ...string) map[string]string {
+	env := map[string]string{ {{- $req -}} }
+	for i := 0; i+1 < len(kv); i += 2 {
+		env[kv[i]] = kv[i+1]
+	}
+	return env
+}
 
 func TestLoad(t *testing.T) {
 	tests := []struct {
@@ -14,7 +34,7 @@ func TestLoad(t *testing.T) {
 	}{
 		{
 			name: "defaults",
-			env:  map[string]string{ {{- if .HasDB}}"DATABASE_URL": "test-dsn"{{end}} },
+			env:  valid(),
 			check: func(t *testing.T, c Config) {
 				if c.Port != "8080" || c.Env != "dev" || c.ServiceName != "{{.Opt.Name}}" || c.LogLevel != "INFO" {
 					t.Errorf("unexpected defaults: %+v", c)
@@ -23,7 +43,7 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name: "overrides",
-			env:  map[string]string{"PORT": "9090", "APP_ENV": "prod", {{- if .HasDB}}"DATABASE_URL": "test-dsn"{{end}} },
+			env:  valid("PORT", "9090", "APP_ENV", "prod"),
 			check: func(t *testing.T, c Config) {
 				if c.Port != "9090" || c.Env != "prod" {
 					t.Errorf("overrides not applied: %+v", c)
@@ -32,20 +52,20 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name:    "port not a number",
-			env:     map[string]string{"PORT": "http", {{- if .HasDB}}"DATABASE_URL": "test-dsn"{{end}} },
+			env:     valid("PORT", "http"),
 			wantErr: "PORT",
 		},
 {{- if .HasDB}}
 		{
 			name:    "database url missing",
-			env:     map[string]string{"DATABASE_URL": ""},
+			env:     valid("DATABASE_URL", ""),
 			wantErr: "DATABASE_URL",
 		},
 {{- end}}
 {{- if .Migrations}}
 		{
 			name: "migrate on start by default",
-			env:  map[string]string{"DATABASE_URL": "test-dsn"},
+			env:  valid(),
 			check: func(t *testing.T, c Config) {
 				if !c.MigrateOnStart {
 					t.Error("MigrateOnStart should default to true")
@@ -54,7 +74,7 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name: "migrate on start off",
-			env:  map[string]string{"DATABASE_URL": "test-dsn", "MIGRATE_ON_START": "false"},
+			env:  valid("MIGRATE_ON_START", "false"),
 			check: func(t *testing.T, c Config) {
 				if c.MigrateOnStart {
 					t.Error("MigrateOnStart should be false")
@@ -63,14 +83,43 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name:    "migrate on start invalid",
-			env:     map[string]string{"DATABASE_URL": "test-dsn", "MIGRATE_ON_START": "maybe"},
+			env:     valid("MIGRATE_ON_START", "maybe"),
 			wantErr: "MIGRATE_ON_START",
+		},
+{{- end}}
+{{- if .Auth}}
+		{
+			name:    "jwt secret missing",
+			env:     valid("JWT_SECRET", ""),
+			wantErr: "JWT_SECRET",
+		},
+		{
+			name:    "jwt secret too short",
+			env:     valid("JWT_SECRET", "short"),
+			wantErr: "JWT_SECRET",
+		},
+		{
+			name: "jwt issuer and audience",
+			env:  valid("JWT_ISSUER", "https://id.example.com", "JWT_AUDIENCE", "api"),
+			check: func(t *testing.T, c Config) {
+				if c.JWTIssuer != "https://id.example.com" || c.JWTAudience != "api" {
+					t.Errorf("issuer/audience not read: %q %q", c.JWTIssuer, c.JWTAudience)
+				}
+			},
+		},
+{{- end}}
+{{- if .Redis}}
+		{
+			name:    "redis url missing",
+			env:     valid("REDIS_URL", ""),
+			wantErr: "REDIS_URL",
 		},
 {{- end}}
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"PORT", "APP_ENV", "SERVICE_NAME", "LOG_LEVEL", "DATABASE_URL", "MIGRATE_ON_START"} {
+			for _, k := range []string{"PORT", "APP_ENV", "SERVICE_NAME", "LOG_LEVEL", "DATABASE_URL", "MIGRATE_ON_START",
+				"JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE", "REDIS_URL"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {

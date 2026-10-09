@@ -1,0 +1,43 @@
+package {{.P.http.Name}};
+
+import {{.P.domain.Name}}.NotFoundException;
+import {{.P.domain.Name}}.ValidationException;
+import java.util.Map;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+/**
+ * Maps entity errors to JSON: 404 not found, 422 validation, 400 bad JSON or
+ * id. Runs before {@link ApiExceptionHandler}, which handles everything else.
+ * Shared by every entity; generated once by projgen add entity.
+ */
+@RestControllerAdvice
+@Order(Ordered.HIGHEST_PRECEDENCE)
+public class EntityExceptionHandler {
+
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<Map<String, String>> notFound(NotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "not found"));
+    }
+
+    @ExceptionHandler(ValidationException.class)
+    public ResponseEntity<Map<String, String>> invalid(ValidationException e) {
+        return ResponseEntity.status(422).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, String>> badBody(HttpMessageNotReadableException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", "invalid JSON body"));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, String>> badParameter(MethodArgumentTypeMismatchException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", "invalid " + e.getName()));
+    }
+}

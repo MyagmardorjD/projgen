@@ -1,0 +1,102 @@
+// Package auth verifies JWT bearer tokens (HS256) for the HTTP layer.
+//
+// Tokens are signed with a shared secret (JWT_SECRET) by whoever issues
+// them: your identity service, or cmd/token during development.
+package auth
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// MinSecretBytes is the shortest accepted secret: HS256 needs 256 bits.
+const MinSecretBytes = 32
+
+// ErrUnauthorized is returned for a missing, malformed, expired or wrongly
+// signed token. The reason is in the wrapped error; never show it to clients.
+var ErrUnauthorized = errors.New("unauthorized")
+
+// Claims are the verified token values handlers may use.
+type Claims struct {
+	Subject string // the user or client id ("sub")
+}
+
+// Verifier checks bearer tokens.
+type Verifier struct {
+	secret   []byte
+	issuer   string
+	audience string
+}
+
+// NewVerifier returns a Verifier. issuer and audience are checked only when set.
+func NewVerifier(secret, issuer, audience string) (*Verifier, error) {
+	if len(secret) < MinSecretBytes {
+		return nil, fmt.Errorf("auth: secret must be at least %d bytes", MinSecretBytes)
+	}
+	return &Verifier{secret: []byte(secret), issuer: issuer, audience: audience}, nil
+}
+
+// Verify checks an Authorization header value ("Bearer <token>") and returns
+// the token's claims. Every failure wraps ErrUnauthorized.
+func (v *Verifier) Verify(header string) (Claims, error) {
+	raw, ok := strings.CutPrefix(header, "Bearer ")
+	if !ok || raw == "" {
+		return Claims{}, fmt.Errorf("%w: no bearer token", ErrUnauthorized)
+	}
+	opts := []jwt.ParserOption{
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithLeeway(30 * time.Second),
+	}
+	if v.issuer != "" {
+		opts = append(opts, jwt.WithIssuer(v.issuer))
+	}
+	if v.audience != "" {
+		opts = append(opts, jwt.WithAudience(v.audience))
+	}
+	var rc jwt.RegisteredClaims
+	if _, err := jwt.ParseWithClaims(raw, &rc, func(*jwt.Token) (any, error) { return v.secret, nil }, opts...); err != nil {
+		return Claims{}, fmt.Errorf("%w: %w", ErrUnauthorized, err)
+	}
+	if rc.Subject == "" {
+		return Claims{}, fmt.Errorf("%w: token has no subject", ErrUnauthorized)
+	}
+	return Claims{Subject: rc.Subject}, nil
+}
+
+// Sign returns an HS256 token for subject that expires after ttl. Use it in
+// tests and cmd/token; production tokens come from your identity service.
+func Sign(secret, subject, issuer, audience string, ttl time.Duration) (string, error) {
+	if len(secret) < MinSecretBytes {
+		return "", fmt.Errorf("auth: secret must be at least %d bytes", MinSecretBytes)
+	}
+	now := time.Now()
+	rc := jwt.RegisteredClaims{
+		Subject:   subject,
+		Issuer:    issuer,
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+	}
+	if audience != "" {
+		rc.Audience = jwt.ClaimStrings{audience}
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, rc).SignedString([]byte(secret))
+}
+
+type ctxKey struct{}
+
+// WithClaims stores verified claims in ctx.
+func WithClaims(ctx context.Context, c Claims) context.Context {
+	return context.WithValue(ctx, ctxKey{}, c)
+}
+
+// FromContext returns the claims of an authenticated request.
+func FromContext(ctx context.Context) (Claims, bool) {
+	c, ok := ctx.Value(ctxKey{}).(Claims)
+	return c, ok
+}

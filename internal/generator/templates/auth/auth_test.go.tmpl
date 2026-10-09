@@ -1,0 +1,85 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// testSecret is a throwaway value for tests only.
+const testSecret = "test-secret-0123456789-0123456789"
+
+func TestNewVerifier_ShortSecret(t *testing.T) {
+	if _, err := NewVerifier("short", "", ""); err == nil {
+		t.Fatal("want an error for a secret shorter than 32 bytes")
+	}
+}
+
+func TestVerify(t *testing.T) {
+	v, err := NewVerifier(testSecret, "issuer-a", "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign := func(secret, sub, iss, aud string, ttl time.Duration) string {
+		t.Helper()
+		tok, err := Sign(secret, sub, iss, aud, ttl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	none := jwt.NewWithClaims(jwt.SigningMethodNone, jwt.RegisteredClaims{Subject: "alice",
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))})
+	noneTok, _ := none.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	noExp, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{Subject: "alice", Issuer: "issuer-a",
+		Audience: jwt.ClaimStrings{"api"}}).SignedString([]byte(testSecret))
+
+	tests := []struct {
+		name    string
+		header  string
+		wantSub string
+	}{
+		{"valid", "Bearer " + sign(testSecret, "alice", "issuer-a", "api", time.Hour), "alice"},
+		{"no header", "", ""},
+		{"not bearer", "Basic abc", ""},
+		{"garbage", "Bearer not-a-token", ""},
+		{"expired", "Bearer " + sign(testSecret, "alice", "issuer-a", "api", -time.Hour), ""},
+		{"wrong secret", "Bearer " + sign(strings.Repeat("x", 32), "alice", "issuer-a", "api", time.Hour), ""},
+		{"wrong issuer", "Bearer " + sign(testSecret, "alice", "issuer-b", "api", time.Hour), ""},
+		{"wrong audience", "Bearer " + sign(testSecret, "alice", "issuer-a", "other", time.Hour), ""},
+		{"no subject", "Bearer " + sign(testSecret, "", "issuer-a", "api", time.Hour), ""},
+		{"alg none", "Bearer " + noneTok, ""},
+		{"no expiry", "Bearer " + noExp, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := v.Verify(tt.header)
+			if tt.wantSub == "" {
+				if !errors.Is(err, ErrUnauthorized) {
+					t.Fatalf("err = %v, want ErrUnauthorized", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if c.Subject != tt.wantSub {
+				t.Errorf("subject = %q, want %q", c.Subject, tt.wantSub)
+			}
+		})
+	}
+}
+
+func TestContext(t *testing.T) {
+	if _, ok := FromContext(context.Background()); ok {
+		t.Error("claims found in an empty context")
+	}
+	ctx := WithClaims(context.Background(), Claims{Subject: "alice"})
+	if c, ok := FromContext(ctx); !ok || c.Subject != "alice" {
+		t.Errorf("FromContext = %+v, %v", c, ok)
+	}
+}

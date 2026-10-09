@@ -16,9 +16,34 @@ services:
 {{- else}}
       DATABASE_URL: "{{.DB.ComposeURL}}"
 {{- end}}
+{{- end}}
+{{- if .Auth}}
+      # No default: put JWT_SECRET in .env (at least 32 bytes).
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
+{{- end}}
+{{- if .Redis}}
+      REDIS_URL: redis://redis:6379/0
+{{- end}}
+{{- if .Observability}}
+{{- if .Java}}
+      TRACING_EXPORT_ENABLED: ${TRACING_EXPORT_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://localhost:4318/v1/traces}
+{{- else}}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+{{- end}}
+{{- end}}
+{{- if or .HasDB .Redis}}
     depends_on:
+{{- if .HasDB}}
       db:
         condition: service_healthy
+{{- end}}
+{{- if .Redis}}
+      redis:
+        condition: service_healthy
+{{- end}}
 {{- end}}
 {{- if eq .Opt.Database "postgresql"}}
 
@@ -55,6 +80,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+{{- end}}
+{{- if .Redis}}
+
+  redis:
+    image: {{.RedisImage}}
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 {{- end}}
 {{- if .HasDB}}
 
