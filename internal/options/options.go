@@ -12,8 +12,8 @@ import (
 
 // Choice is one selectable value shown to the developer.
 type Choice struct {
-	Value string
-	Label string
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 var (
@@ -49,13 +49,13 @@ var (
 
 // Options is the full set of choices for one generated project.
 type Options struct {
-	Name         string   `yaml:"name"`
-	Module       string   `yaml:"module"`
-	Language     string   `yaml:"language"`
-	Framework    string   `yaml:"framework"`
-	Architecture string   `yaml:"architecture"`
-	Database     string   `yaml:"database"`
-	Extras       []string `yaml:"extras"`
+	Name         string   `yaml:"name" json:"name"`
+	Module       string   `yaml:"module" json:"module"`
+	Language     string   `yaml:"language" json:"language"`
+	Framework    string   `yaml:"framework" json:"framework"`
+	Architecture string   `yaml:"architecture" json:"architecture"`
+	Database     string   `yaml:"database" json:"database"`
+	Extras       []string `yaml:"extras" json:"extras"`
 }
 
 // HasExtra reports whether the extra was selected.

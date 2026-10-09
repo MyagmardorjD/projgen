@@ -3,6 +3,7 @@
 //	projgen new                       ask questions interactively
 //	projgen new --config project.yaml read choices from a file
 //	projgen list                      show supported options
+//	projgen serve                     pick options in the browser
 //	projgen update                    fetch latest technology versions
 //	projgen versions                  show the versions new projects will use
 package main
@@ -13,17 +14,21 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/MyagmardorjD/projgen/internal/create"
 	"github.com/MyagmardorjD/projgen/internal/generator"
 	"github.com/MyagmardorjD/projgen/internal/options"
 	"github.com/MyagmardorjD/projgen/internal/prompt"
 	"github.com/MyagmardorjD/projgen/internal/versions"
+	"github.com/MyagmardorjD/projgen/internal/web"
 )
 
 // refreshAfter is how old cached versions may get before "new" refreshes them.
@@ -52,6 +57,8 @@ func run(args []string, in io.Reader, out io.Writer) error {
 	case "list":
 		cmdList(out)
 		return nil
+	case "serve":
+		return cmdServe(args[1:], out)
 	case "update":
 		return cmdUpdate(out)
 	case "versions":
@@ -73,6 +80,7 @@ func usage(out io.Writer) {
 
 Usage:
   projgen new [flags]   create a project (asks questions unless --config is given)
+  projgen serve         open the web UI to pick options, download a ZIP or create locally
   projgen list          show supported languages, frameworks, architectures, databases, extras
   projgen update        fetch the latest versions from official sources
   projgen versions      show the versions new projects will use
@@ -86,6 +94,11 @@ Flags for new:
   --force         write into a non-empty directory
   --skip-tidy     do not run "go mod tidy" after generating
   --no-git        do not run "git init"
+  --offline       do not check official sources for newer versions
+
+Flags for serve:
+  --port N        port on 127.0.0.1 (default 8090)
+  --no-browser    do not open the browser
   --offline       do not check official sources for newer versions
 `)
 }
@@ -118,11 +131,11 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 			return fmt.Errorf("%s:\n%w", *cfgPath, err)
 		}
 		if dir == "" {
-			dir = filepath.Join(defaultParent(), o.Name)
+			dir = filepath.Join(create.DefaultParent(), o.Name)
 		}
 	} else {
 		var err error
-		if o, dir, err = prompt.New(in, out).Ask(dir, defaultParent()); err != nil {
+		if o, dir, err = prompt.New(in, out).Ask(dir, create.DefaultParent()); err != nil {
 			return err
 		}
 	}
@@ -133,7 +146,11 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 		return err
 	}
 	v := currentVersions(out, *offline)
-	res, err := generator.Generate(o, v, dir, generator.Flags{DryRun: *dryRun, Force: *force})
+	if !*dryRun && !*skipTidy {
+		fmt.Fprintln(out, "Writing files, then running go mod tidy (downloads dependencies)...")
+	}
+	steps := create.Steps{Tidy: !*skipTidy, Git: !*noGit}
+	res, warns, err := create.Project(o, v, dir, generator.Flags{DryRun: *dryRun, Force: *force}, steps, out)
 	if err != nil {
 		return err
 	}
@@ -146,24 +163,57 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 		return nil
 	}
 	fmt.Fprintf(out, "Created %d files in %s\n", len(res.Files), dir)
-
-	if !*skipTidy {
-		fmt.Fprintln(out, "Running go mod tidy (downloads dependencies)...")
-		if err := runIn(dir, out, "go", "mod", "tidy"); err != nil {
-			fmt.Fprintf(out, "warning: go mod tidy failed: %v\nRun it yourself once you are online.\n", err)
-		}
-	}
-	if !*noGit {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
-			if err := runIn(dir, out, "git", "init", "-q"); err != nil {
-				fmt.Fprintf(out, "warning: git init failed: %v\n", err)
-			}
-		}
+	for _, w := range warns {
+		fmt.Fprintf(out, "warning: %s failed: %v\n", w.Step, w.Err)
 	}
 
 	fmt.Fprintf(out, "\nProject location: %s\n", dir)
 	fmt.Fprintf(out, "\nNext steps:\n  cd \"%s\"\n  go test ./...\n  go run ./cmd/server\n", dir)
 	return nil
+}
+
+func cmdServe(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(out)
+	port := fs.Int("port", 8090, "")
+	noBrowser := fs.Bool("no-browser", false, "")
+	offline := fs.Bool("offline", false, "")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Listen on loopback only: the UI can write to this computer's disk.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	if err != nil {
+		return fmt.Errorf("cannot listen on port %d (try --port): %w", *port, err)
+	}
+	addr := ln.Addr().(*net.TCPAddr)
+
+	s := web.New(currentVersions(out, *offline), refresh)
+	s.AllowHost(fmt.Sprintf("127.0.0.1:%d", addr.Port))
+	s.AllowHost(fmt.Sprintf("localhost:%d", addr.Port))
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/", addr.Port)
+	fmt.Fprintf(out, "projgen UI: %s  (Ctrl+C to stop)\n", url)
+	if !*noBrowser {
+		if err := web.OpenBrowser(url); err != nil {
+			fmt.Fprintf(out, "Open %s in your browser.\n", url)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ln) }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
 }
 
 // currentVersions returns the versions to generate with. Unless offline, it
@@ -236,24 +286,6 @@ func printVersions(out io.Writer, old, cur versions.Versions) {
 	for _, a := range versions.Actions {
 		row(a, "GitHub", old.Actions[a], cur.Actions[a])
 	}
-}
-
-// defaultParent is where projects go unless the developer chooses otherwise:
-// the user's local repositories folder, ~/source/repos.
-func defaultParent() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
-	}
-	return filepath.Join(home, "source", "repos")
-}
-
-func runIn(dir string, out io.Writer, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	cmd.Stdout = out
-	cmd.Stderr = out
-	return cmd.Run()
 }
 
 func cmdList(out io.Writer) {

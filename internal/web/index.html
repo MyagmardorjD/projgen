@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="projgen-token" content="__PROJGEN_TOKEN__">
+<title>projgen</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #16181d; --muted: #5d6470; --line: #e2e5ea;
+  --accent: #2563eb; --accent-soft: #e8efff; --accent-text: #ffffff;
+  --ok: #15803d; --ok-soft: #e9f7ee; --warn: #b45309; --warn-soft: #fdf4e3; --err: #b91c1c; --err-soft: #fdecec;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --card: #171a21; --text: #e8eaee; --muted: #9aa2ae; --line: #2a2f3a;
+    --accent: #5b8cff; --accent-soft: #1c2740; --accent-text: #0b0d12;
+    --ok: #4ade80; --ok-soft: #12261a; --warn: #fbbf24; --warn-soft: #2a2110; --err: #f87171; --err-soft: #2b1414;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { padding: 20px 24px 8px; max-width: 1200px; margin: 0 auto; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); }
+main { max-width: 1200px; margin: 0 auto; padding: 12px 24px 48px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px 40px; } header { padding: 16px 16px 4px; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.card + .card { margin-top: 16px; }
+aside { position: sticky; top: 16px; }
+@media (max-width: 900px) { aside { position: static; } }
+section + section { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+label.field { display: block; margin-bottom: 12px; }
+label.field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input[type=text] { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.opt { position: relative; display: block; cursor: pointer; }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; height: 100%; transition: border-color .12s, background .12s; }
+.opt b { display: block; font-weight: 600; }
+.opt small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.opt:hover div { border-color: var(--muted); }
+.opt input:checked + div { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.opt input:focus-visible + div { outline: 2px solid var(--accent); outline-offset: 2px; }
+.path { font-family: var(--mono); font-size: 13px; background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; }
+.checks { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.checks label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+button { font: inherit; border-radius: 8px; padding: 10px 16px; cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled { opacity: .55; cursor: progress; }
+button.small { padding: 5px 10px; font-size: 13px; }
+.msg { border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 14px; }
+.msg.err { background: var(--err-soft); color: var(--err); }
+.msg.warn { background: var(--warn-soft); color: var(--warn); }
+.msg.ok { background: var(--ok-soft); color: var(--ok); }
+.msg ul { margin: 4px 0 0; padding-left: 18px; }
+.tree { font-family: var(--mono); font-size: 12.5px; line-height: 1.7; max-height: 46vh; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.tree ul { list-style: none; margin: 0; padding-left: 16px; border-left: 1px solid var(--line); }
+.tree .dir { color: var(--muted); }
+.head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.head h2 { margin: 0; }
+.count { font-size: 12px; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:nth-child(2) { font-family: var(--mono); text-align: right; white-space: nowrap; padding-left: 8px; }
+td small { display: block; color: var(--muted); font-size: 11.5px; }
+#result .path { margin: 8px 0 12px; }
+details { margin-top: 10px; }
+details pre { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; overflow: auto; max-height: 220px; white-space: pre-wrap; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>projgen</h1>
+  <p>Технологиор сонгоод, ажилладаг төслийн суурь үүсгэ</p>
+</header>
+<main>
+  <div>
+    <form class="card" id="form" autocomplete="off">
+      <section>
+        <h2>Төсөл</h2>
+        <label class="field"><span>Төслийн нэр</span><input type="text" id="name" value="my-service" spellcheck="false"></label>
+        <label class="field"><span>Go module зам</span><input type="text" id="module" spellcheck="false"></label>
+      </section>
+      <section><h2>Хэл</h2><div class="grid" id="language"></div></section>
+      <section><h2>Framework</h2><div class="grid" id="framework"></div></section>
+      <section><h2>Архитектур</h2><div class="grid" id="architecture"></div></section>
+      <section><h2>Өгөгдлийн сан</h2><div class="grid" id="database"></div></section>
+      <section><h2>Нэмэлт</h2><div class="grid" id="extras"></div></section>
+      <section>
+        <h2>Байршил</h2>
+        <label class="field"><span>Аль хавтас дотор үүсгэх вэ</span><input type="text" id="parent" spellcheck="false"></label>
+        <div class="path" id="target">—</div>
+        <div class="msg warn hidden" id="notEmpty">Энэ хавтас хоосон биш байна.
+          <label style="display:block;margin-top:6px"><input type="checkbox" id="force"> Дарж бичихийг зөвшөөрөх</label>
+        </div>
+        <div class="checks" style="margin-top:12px">
+          <label><input type="checkbox" id="tidy" checked> go mod tidy ажиллуулах</label>
+          <label><input type="checkbox" id="git" checked> git init хийх</label>
+        </div>
+      </section>
+      <div id="errors" class="msg err hidden"></div>
+      <div class="actions">
+        <button type="submit" class="primary" id="createBtn">Компьютер дээр үүсгэх</button>
+        <button type="button" id="zipBtn">ZIP татах</button>
+      </div>
+    </form>
+
+    <div class="card hidden" id="result" aria-live="polite">
+      <h2>Төсөл үүслээ</h2>
+      <div id="resultText"></div>
+      <div class="path" id="resultDir"></div>
+      <div class="actions" style="margin-top:0">
+        <button type="button" class="primary hidden" id="openCode">VS Code-оор нээх</button>
+        <button type="button" id="openFolder">Хавтас нээх</button>
+        <button type="button" id="copyPath">Замыг хуулах</button>
+      </div>
+      <div id="resultWarn"></div>
+      <details><summary>Гүйцэтгэлийн лог</summary><pre id="resultLog"></pre></details>
+    </div>
+  </div>
+
+  <aside>
+    <div class="card">
+      <div class="head"><h2>Үүсэх файлууд</h2><span class="count" id="fileCount"></span></div>
+      <ul class="tree" id="tree"></ul>
+    </div>
+    <div class="card">
+      <div class="head"><h2>Хувилбарууд</h2><button type="button" class="small" id="updateBtn">Шинэчлэх</button></div>
+      <table><tbody id="versions"></tbody></table>
+      <div class="count" id="fetchedAt" style="margin-top:8px"></div>
+      <div id="updateMsg"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+const TOKEN = document.querySelector('meta[name="projgen-token"]').content;
+const $ = (id) => document.getElementById(id);
+let meta = null, moduleEdited = false, lastDir = '', timer = null;
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Projgen-Token': TOKEN },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return res;
+}
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') n.className = v; else if (k in n) n[k] = v; else n.setAttribute(k, v);
+  }
+  for (const c of children) n.append(c);
+  return n;
+}
+
+// "Clean Architecture (domain / usecase / delivery)" -> ["Clean Architecture", "domain / usecase / delivery"]
+function split(label) {
+  const m = label.match(/^(.*?)\s*\((.*)\)$/);
+  return m ? [m[1], m[2]] : [label, ''];
+}
+
+function choices(container, name, list, type) {
+  container.replaceChildren(...list.map((c, i) => {
+    const [title, sub] = split(c.label);
+    const input = el('input', { type, name, value: c.value, checked: type === 'radio' && i === 0 });
+    return el('label', { class: 'opt' }, input, el('div', {}, el('b', {}, title), sub ? el('small', {}, sub) : ''));
+  }));
+}
+
+function picked(name) {
+  const n = document.querySelector(`input[name="${name}"]:checked`);
+  return n ? n.value : '';
+}
+
+function payload() {
+  return {
+    options: {
+      name: $('name').value.trim(),
+      module: $('module').value.trim(),
+      language: picked('language'),
+      framework: picked('framework'),
+      architecture: picked('architecture'),
+      database: picked('database'),
+      extras: [...document.querySelectorAll('input[name="extras"]:checked')].map((n) => n.value),
+    },
+    parent: $('parent').value.trim(),
+    force: $('force').checked,
+    tidy: $('tidy').checked,
+    git: $('git').checked,
+  };
+}
+
+function showErrors(list) {
+  const box = $('errors');
+  if (!list || !list.length) { box.classList.add('hidden'); return; }
+  box.replaceChildren(el('b', {}, 'Сонголтоо засна уу:'), el('ul', {}, ...list.map((e) => el('li', {}, e))));
+  box.classList.remove('hidden');
+}
+
+function renderTree(paths) {
+  const root = {};
+  for (const p of paths) {
+    let node = root;
+    for (const part of p.split('/')) node = node[part] = node[part] || {};
+  }
+  const build = (node) => Object.keys(node)
+    .sort((a, b) => (Object.keys(node[b]).length > 0) - (Object.keys(node[a]).length > 0) || a.localeCompare(b))
+    .map((k) => {
+      const kids = Object.keys(node[k]);
+      return kids.length
+        ? el('li', {}, el('span', { class: 'dir' }, k + '/'), el('ul', {}, ...build(node[k])))
+        : el('li', {}, k);
+    });
+  $('tree').replaceChildren(...build(root));
+  $('fileCount').textContent = paths.length + ' файл';
+}
+
+function renderVersions(v) {
+  $('versions').replaceChildren(...v.rows.map((r) =>
+    el('tr', {}, el('td', {}, r.name, el('small', {}, r.source)), el('td', {}, r.version || '—'))));
+  $('fetchedAt').textContent = v.fetched_at ? 'Шалгасан: ' + v.fetched_at : 'Суулгасан анхны хувилбарууд';
+}
+
+async function preview() {
+  const res = await api('/api/preview', payload());
+  const data = await res.json();
+  if (!res.ok) { showErrors(data.errors); return; }
+  showErrors(null);
+  lastDir = data.dir;
+  $('target').textContent = data.dir;
+  $('notEmpty').classList.toggle('hidden', !data.dir_not_empty);
+  renderTree(data.files);
+}
+
+function schedule() { clearTimeout(timer); timer = setTimeout(preview, 200); }
+
+function busy(on) {
+  for (const id of ['createBtn', 'zipBtn']) $(id).disabled = on;
+  $('createBtn').textContent = on ? 'Үүсгэж байна…' : 'Компьютер дээр үүсгэх';
+}
+
+async function createProject(ev) {
+  ev.preventDefault();
+  busy(true);
+  try {
+    const res = await api('/api/create', payload());
+    const data = await res.json();
+    if (!res.ok) { showErrors(data.errors); if (res.status === 409) $('notEmpty').classList.remove('hidden'); return; }
+    showErrors(null);
+    $('resultText').textContent = data.files.length + ' файл бичигдлээ.';
+    $('resultDir').textContent = data.dir;
+    $('resultDir').dataset.dir = data.dir;
+    $('openCode').classList.toggle('hidden', !data.has_code);
+    $('resultWarn').replaceChildren(...data.warnings.map((w) => el('div', { class: 'msg warn' }, w)));
+    $('resultLog').textContent = data.log || '(лог хоосон)';
+    $('result').classList.remove('hidden');
+    $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    preview();
+  } catch (e) {
+    showErrors([String(e)]);
+  } finally {
+    busy(false);
+  }
+}
+
+async function downloadZip() {
+  busy(true);
+  try {
+    const res = await api('/api/zip', payload());
+    if (!res.ok) { showErrors((await res.json()).errors); return; }
+    const blob = await res.blob();
+    const a = el('a', { href: URL.createObjectURL(blob), download: payload().options.name + '.zip' });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } finally {
+    busy(false);
+  }
+}
+
+async function openDir(withWhat) {
+  const res = await api('/api/open', { dir: $('resultDir').dataset.dir, with: withWhat });
+  if (!res.ok) $('resultWarn').append(el('div', { class: 'msg err' }, (await res.json()).errors.join(' ')));
+}
+
+async function updateVersions() {
+  const btn = $('updateBtn');
+  btn.disabled = true; btn.textContent = 'Шалгаж байна…';
+  try {
+    const data = await (await api('/api/update', {})).json();
+    renderVersions(data.versions);
+    $('updateMsg').replaceChildren(data.warning
+      ? el('div', { class: 'msg warn' }, 'Зарим эх сурвалжийг шалгаж чадсангүй, хадгалсан хувилбарыг ашиглана.')
+      : el('div', { class: 'msg ok' }, 'Албан ёсны эх сурвалжаас шинэчлэгдлээ.'));
+    preview();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Шинэчлэх';
+  }
+}
+
+function syncModule() {
+  if (!moduleEdited) $('module').value = 'github.com/MyagmardorjD/' + $('name').value.trim();
+}
+
+async function init() {
+  meta = await (await api('/api/options')).json();
+  choices($('language'), 'language', meta.languages, 'radio');
+  choices($('framework'), 'framework', meta.frameworks[meta.languages[0].value], 'radio');
+  choices($('architecture'), 'architecture', meta.architectures, 'radio');
+  choices($('database'), 'database', meta.databases, 'radio');
+  choices($('extras'), 'extras', meta.extras, 'checkbox');
+  $('parent').value = meta.default_parent;
+  syncModule();
+  renderVersions(meta.versions);
+
+  $('name').addEventListener('input', syncModule);
+  $('module').addEventListener('input', () => { moduleEdited = true; });
+  $('language').addEventListener('change', () => choices($('framework'), 'framework', meta.frameworks[picked('language')], 'radio'));
+  $('form').addEventListener('input', schedule);
+  $('form').addEventListener('change', schedule);
+  $('form').addEventListener('submit', createProject);
+  $('zipBtn').addEventListener('click', downloadZip);
+  $('updateBtn').addEventListener('click', updateVersions);
+  $('openCode').addEventListener('click', () => openDir('code'));
+  $('openFolder').addEventListener('click', () => openDir('folder'));
+  $('copyPath').addEventListener('click', () => navigator.clipboard.writeText($('resultDir').dataset.dir));
+  preview();
+}
+
+init();
+</script>
+</body>
+</html>
