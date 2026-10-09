@@ -1,0 +1,9 @@
+package {{.P.domain.Name}};
+
+/** Thrown when a record does not exist. Shared by every entity; generated once by projgen add entity. */
+public class NotFoundException extends RuntimeException {
+
+    public NotFoundException() {
+        super("not found");
+    }
+}

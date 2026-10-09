@@ -1,0 +1,87 @@
+package {{.P.db.Name}};
+
+import {{.P.domain.Name}}.NotFoundException;
+import {{.P.domain.Name}}.{{.E.Name}};
+import {{.P.domain.Name}}.{{.E.Name}}Input;
+import {{.P.domain.Name}}.{{.E.Name}}Repository;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+{{- if .HasTime}}
+import java.sql.Timestamp;
+{{- end}}
+import java.util.List;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.stereotype.Repository;
+
+/** Stores {{.E.Table}} in {{if eq .Opt.Database "postgresql"}}PostgreSQL{{else}}MySQL{{end}}. The table comes from db/migration. */
+@Repository
+public class Jdbc{{.E.Name}}Repository implements {{.E.Name}}Repository {
+
+    private static final String COLUMNS = "{{.SQL.SelectCols}}";
+
+    private final JdbcClient jdbc;
+
+    public Jdbc{{.E.Name}}Repository(JdbcClient jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    private static {{.E.Name}} map(ResultSet rs, int row) throws SQLException {
+        return new {{.E.Name}}(
+                rs.getLong("id"),
+{{- range .Fields}}
+                rs.{{.JavaGet}}("{{.Column}}"){{if eq .Type "time"}}.toInstant(){{end}},
+{{- end}}
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant());
+    }
+
+    @Override
+    public {{.E.Name}} create({{.E.Name}}Input in) {
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.sql("INSERT INTO {{.E.Table}} ({{.SQL.InsertCols}}) VALUES ({{.SQL.InsertVals}})")
+                .params({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.JavaParam}}{{end}})
+                .update(keys, "id");
+        Number id = keys.getKey();
+        if (id == null) {
+            throw new IllegalStateException("insert {{.E.Snake}}: no id returned");
+        }
+        return get(id.longValue());
+    }
+
+    @Override
+    public {{.E.Name}} get(long id) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM {{.E.Table}} WHERE id = ?")
+                .param(id)
+                .query(Jdbc{{.E.Name}}Repository::map)
+                .optional()
+                .orElseThrow(NotFoundException::new);
+    }
+
+    @Override
+    public List<{{.E.Name}}> list(int limit, int offset) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM {{.E.Table}} ORDER BY id LIMIT ? OFFSET ?")
+                .params(limit, offset)
+                .query(Jdbc{{.E.Name}}Repository::map)
+                .list();
+    }
+
+    @Override
+    public {{.E.Name}} update(long id, {{.E.Name}}Input in) {
+        int n = jdbc.sql("UPDATE {{.E.Table}} SET {{.SQL.UpdateSet}}{{if eq .Opt.Database "postgresql"}}, updated_at = now(){{end}} WHERE id = ?")
+                .params({{range .Fields}}{{.JavaParam}}, {{end}}id)
+                .update();
+        if (n == 0) {
+            throw new NotFoundException();
+        }
+        return get(id);
+    }
+
+    @Override
+    public void delete(long id) {
+        if (jdbc.sql("DELETE FROM {{.E.Table}} WHERE id = ?").param(id).update() == 0) {
+            throw new NotFoundException();
+        }
+    }
+}

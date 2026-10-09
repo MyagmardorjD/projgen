@@ -1,0 +1,88 @@
+package {{.P.db.Name}};
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import {{.P.domain.Name}}.NotFoundException;
+import {{.P.domain.Name}}.{{.E.Name}};
+import {{.P.domain.Name}}.{{.E.Name}}Input;
+{{- if .HasTime}}
+import java.time.Instant;
+{{- end}}
+{{- if not .Migrations}}
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Comparator;
+{{- end}}
+import java.util.Objects;
+import javax.sql.DataSource;
+{{- if .Migrations}}
+import org.flywaydb.core.Flyway;
+{{- end}}
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+{{- if not .Migrations}}
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+{{- end}}
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+{{- if not .Migrations}}
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+{{- end}}
+
+/**
+ * Runs the repository against TEST_DATABASE_URL (a JDBC URL, with
+ * TEST_DATABASE_USER and TEST_DATABASE_PASSWORD). Use a throwaway database:
+ * the {{.E.Table}} table is {{if .Migrations}}migrated by Flyway and emptied{{else}}recreated from its migration{{end}}. Skipped when the variable is not set.
+ */
+@EnabledIfEnvironmentVariable(named = "TEST_DATABASE_URL", matches = ".+")
+class Jdbc{{.E.Name}}RepositoryTest {
+
+    private Jdbc{{.E.Name}}Repository repo;
+
+    @BeforeEach
+    void setUp(){{if not .Migrations}} throws IOException{{end}} {
+        DataSource ds = new DriverManagerDataSource(System.getenv("TEST_DATABASE_URL"),
+                Objects.requireNonNullElse(System.getenv("TEST_DATABASE_USER"), ""),
+                Objects.requireNonNullElse(System.getenv("TEST_DATABASE_PASSWORD"), ""));
+        JdbcClient jdbc = JdbcClient.create(ds);
+{{- if .Migrations}}
+        Flyway.configure().dataSource(ds).load().migrate();
+        jdbc.sql("DELETE FROM {{.E.Table}}").update();
+{{- else}}
+        jdbc.sql("DROP TABLE IF EXISTS {{.E.Table}}").update();
+        Resource[] scripts = new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/V*__create_{{.E.Table}}.sql");
+        Resource latest = Arrays.stream(scripts)
+                .max(Comparator.comparing(Resource::getFilename))
+                .orElseThrow(() -> new IllegalStateException("no migration for {{.E.Table}}"));
+        new ResourceDatabasePopulator(latest).execute(ds);
+{{- end}}
+        repo = new Jdbc{{.E.Name}}Repository(jdbc);
+    }
+
+    private static {{.E.Name}}Input sample() {
+        return new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.JavaSample}}{{end}});
+    }
+
+    @Test
+    void crud() {
+        {{.E.Name}} created = repo.create(sample());
+        assertThat(created.id()).isPositive();
+{{- range .Fields}}
+        assertThat(created.{{.Java}}()).isEqualTo({{.JavaSample}});
+{{- end}}
+        assertThat(repo.get(created.id())).isEqualTo(created);
+        assertThat(repo.list(10, 0)).extracting({{.E.Name}}::id).contains(created.id());
+
+        {{.E.Name}} updated = repo.update(created.id(), sample());
+        assertThat(updated.createdAt()).isEqualTo(created.createdAt());
+
+        repo.delete(created.id());
+        assertThatThrownBy(() -> repo.get(created.id())).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> repo.update(created.id(), sample())).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> repo.delete(created.id())).isInstanceOf(NotFoundException.class);
+    }
+}

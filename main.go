@@ -343,7 +343,7 @@ func cmdAdd(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "\nNext steps:")
 	for _, f := range res.Created {
-		if !strings.HasSuffix(f, ".up.sql") {
+		if !strings.HasSuffix(f, ".up.sql") && !strings.HasPrefix(f, "src/main/resources/db/migration/") {
 			continue
 		}
 		if res.AutoMigrate {
@@ -351,6 +351,10 @@ func cmdAdd(args []string, out io.Writer) error {
 		} else {
 			fmt.Fprintf(out, "  apply the migration: %s\n", f)
 		}
+	}
+	if res.Java {
+		fmt.Fprintln(out, "  ./mvnw verify            (Windows: mvnw.cmd verify)")
+		return nil
 	}
 	fmt.Fprintln(out, "  go test ./...")
 	return nil

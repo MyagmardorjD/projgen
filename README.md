@@ -118,9 +118,9 @@ module_prefix: gitlab.techpartners.asia/backend   # module = <prefix>/<нэр>
 projgen add entity Product name:string:required description:text price:float stock:int active:bool released_at:time
 ```
 
-Одоогоор зөвхөн Go төсөлд. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ.
+Go болон Java төсөлд ажиллана. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ. Нэг секундэд хэд хэдэн entity нэмсэн ч migration-ий хувилбар давхцахгүй.
 
-`project.yaml`-аас бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ:
+`project.yaml`-аас хэл, бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ. Go төсөлд:
 
 | Файл | Агуулга |
 | --- | --- |
@@ -133,7 +133,22 @@ projgen add entity Product name:string:required description:text price:float sto
 
 `router.go`, `main.go` дахь `// projgen:` тэмдэгтэй мөрийн өмнө шинэ entity-г автоматаар холбоно. Тэмдэггүй хуучин төсөлд юуг гараар нэмэхийг хэвлэнэ. Байгаа entity-г дахин үүсгэхэд `--force` хэрэгтэй.
 
-Алдааны хариу: шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`.
+Java (Spring Boot) төсөлд:
+
+| Файл | Агуулга |
+| --- | --- |
+| domain `Product.java`, `ProductInput.java`, `ProductRepository.java` | record-ууд (JSON нь `snake_case`), шалгалт, repository interface |
+| domain `NotFoundException.java`, `ValidationException.java` | Бүх entity-д нэг удаа үүснэ |
+| service `ProductService.java` + тест | Бизнес дүрэм, хуудаслалт (анхдагч 20, дээд тал 100) |
+| repository `JdbcProductRepository.java` | `JdbcClient`-ээр PostgreSQL/MySQL, DB-гүй бол `InMemoryProductRepository` |
+| repository `JdbcProductRepositoryTest.java` | `TEST_DATABASE_URL` (JDBC) өгвөл жинхэнэ DB дээр CRUD шалгана |
+| web `ProductController.java` + MockMvc тест | Go-тай ижил endpoint-ууд |
+| web `EntityExceptionHandler.java` | `404` / `422` / `400` хариуг `ApiExceptionHandler`-ээс өмнө буцаана |
+| `db/migration/V<огноо>__create_products.sql` | Flyway migration (`migrations` сонгосон бол асахдаа автоматаар) |
+
+Spring component scan хийдэг тул юу ч гараар холбох шаардлагагүй. Java-гийн түлхүүр үг (`class`, `new` г.м.) болон `String`, `List` зэрэг класстай давхцах нэрийг хүлээж авахгүй. Хоосон ирсэн тоо, bool талбар 0/false болно, `time` талбарыг заавал илгээнэ.
+
+Алдааны хариу (хоёр хэлэнд ижил): шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`.
 
 ## Технологийн хувилбарууд
 
@@ -175,5 +190,5 @@ PROJGEN_E2E=1 go test ./internal/generator -run BuildAndTest -timeout 30m
 | Workflow | Хэзээ | Юу хийдэг |
 | --- | --- | --- |
 | `ci.yml` | push, PR бүрт | gofmt, go vet, go test (Ubuntu + Windows), race detector |
-| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. 9 Java хослолыг `mvnw verify`-ээр шалгана. Эвдэрвэл issue нээнэ |
+| `e2e.yml` | Даваа гараг бүр 09:00 (Улаанбаатар), generator өөрчлөгдөхөд, гараар | 36 хослолыг entity-тэй болон entity-гүйгээр хамгийн сүүлийн хувилбараар шалгана. Үүссэн repository-г жинхэнэ PostgreSQL, MySQL дээр шалгана. 9 Java хослолыг entity-тэй болон entity-гүйгээр `mvnw verify`-ээр, Java-гийн JDBC repository-г жинхэнэ DB дээр шалгана. Эвдэрвэл issue нээнэ |
 | Dependabot | 7 хоног бүр | projgen-ий Go dependency, Actions-ийн хувилбарыг шинэчлэх PR |

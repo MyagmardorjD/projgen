@@ -1,0 +1,14 @@
+package {{.P.domain.Name}};
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.time.Instant;
+
+/** A {{.E.Name}} stored in the {{.E.Table}} table. */
+public record {{.E.Name}}(
+        long id,
+{{- range .Fields}}
+        @JsonProperty("{{.JSON}}") {{.JavaType}} {{.Java}},
+{{- end}}
+        @JsonProperty("created_at") Instant createdAt,
+        @JsonProperty("updated_at") Instant updatedAt) {
+}

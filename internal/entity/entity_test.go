@@ -265,12 +265,3 @@ func TestAdded_RealDatabase(t *testing.T) {
 	}
 }
 
-func TestAdd_JavaProjectNotSupportedYet(t *testing.T) {
-	o := options.Options{Name: "shop", Module: "com.techpartners.shop", Language: "java",
-		Framework: "spring-boot", Architecture: "clean", Database: "postgresql"}
-	dir := newProject(t, o)
-	spec, _ := Parse("Product", testFields)
-	if _, err := Add(dir, spec, false, time.Now()); err == nil || !strings.Contains(err.Error(), "Go projects only") {
-		t.Fatalf("err = %v, want a not-supported error", err)
-	}
-}

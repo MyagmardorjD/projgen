@@ -1,0 +1,18 @@
+package {{.P.domain.Name}};
+
+import java.util.List;
+
+/** Thrown when input breaks a business rule. Shared by every entity; generated once by projgen add entity. */
+public class ValidationException extends RuntimeException {
+
+    private final List<String> problems;
+
+    public ValidationException(List<String> problems) {
+        super("validation failed: " + String.join("; ", problems));
+        this.problems = List.copyOf(problems);
+    }
+
+    public List<String> problems() {
+        return problems;
+    }
+}

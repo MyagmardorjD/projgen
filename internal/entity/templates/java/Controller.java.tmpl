@@ -1,0 +1,65 @@
+package {{.P.http.Name}};
+
+import {{.P.domain.Name}}.{{.E.Name}};
+import {{.P.domain.Name}}.{{.E.Name}}Input;
+import {{.P.service.Name}}.{{.E.Name}}Service;
+import java.util.List;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/** CRUD endpoints for {{.E.Table}} under /api/v1/{{.E.Route}}. */
+@RestController
+@RequestMapping("/api/v1/{{.E.Route}}")
+public class {{.E.Name}}Controller {
+
+    private final {{.E.Name}}Service service;
+
+    public {{.E.Name}}Controller({{.E.Name}}Service service) {
+        this.service = service;
+    }
+
+    @PostMapping
+    public ResponseEntity<{{.E.Name}}> create(@RequestBody {{.E.Name}}Input in) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.create(in));
+    }
+
+    /** ?limit= and ?offset= are optional; bad values fall back to the defaults. */
+    @GetMapping
+    public List<{{.E.Name}}> list(@RequestParam(name = "limit", required = false) String limit,
+            @RequestParam(name = "offset", required = false) String offset) {
+        return service.list(intOrZero(limit), intOrZero(offset));
+    }
+
+    @GetMapping("/{id}")
+    public {{.E.Name}} get(@PathVariable("id") long id) {
+        return service.get(id);
+    }
+
+    @PutMapping("/{id}")
+    public {{.E.Name}} update(@PathVariable("id") long id, @RequestBody {{.E.Name}}Input in) {
+        return service.update(id, in);
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable("id") long id) {
+        service.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    private static int intOrZero(String s) {
+        try {
+            return s == null ? 0 : Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+}
