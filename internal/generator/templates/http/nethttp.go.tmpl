@@ -7,23 +7,54 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+{{- if .Auth}}
+	"strings"
+{{- end}}
 	"time"
 
 	"{{.P.domain.Import}}"
+{{- if .Auth}}
+	"{{.P.auth.Import}}"
+{{- end}}
 	"{{.P.logger.Import}}"
 	{{.P.service.Name}} "{{.P.service.Import}}"
+{{- if .Observability}}
+	"{{.P.telemetry.Import}}"
+{{- end}}
 )
 
 // HealthChecker is implemented by *sql.DB and anything else /health should ping.
 type HealthChecker interface {
 	PingContext(ctx context.Context) error
 }
+{{- if .Redis}}
+
+// HealthChecks pings every checker in order and returns the first error.
+type HealthChecks []HealthChecker
+
+func (hs HealthChecks) PingContext(ctx context.Context) error {
+	for _, h := range hs {
+		if err := h.PingContext(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+{{- end}}
 
 // Deps are the dependencies of the HTTP layer. Health may be nil.
 type Deps struct {
 	Greeter *{{.P.service.Name}}.Greeter
 	Health  HealthChecker
 	Logger  *slog.Logger
+{{- if .Auth}}
+	// Auth checks bearer tokens on /api/v1; nil turns authentication off (tests).
+	Auth *auth.Verifier
+{{- end}}
+{{- if .Observability}}
+	// Telemetry serves /metrics and traces requests; nil turns both off (tests).
+	Telemetry *telemetry.Telemetry
+{{- end}}
 	// projgen:deps (projgen add entity inserts fields here)
 }
 
@@ -31,9 +62,25 @@ type Deps struct {
 func NewRouter(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health(d))
+{{- if .Observability}}
+	if d.Telemetry != nil {
+		mux.Handle("GET /metrics", d.Telemetry.MetricsHandler())
+	}
+{{- end}}
 	mux.HandleFunc("GET /api/v1/hello", hello(d))
+{{- if .Auth}}
+	mux.HandleFunc("GET /api/v1/me", me)
+{{- end}}
 	// projgen:routes (projgen add entity inserts routes here)
-	return requestLogger(d.Logger, recoverer(d.Logger, mux))
+{{- if .Auth}}
+	var h http.Handler = mux
+	if d.Auth != nil {
+		h = requireAuth(d.Auth, "/api/v1/", mux)
+	}
+	return requestLogger(d.Logger{{if .Observability}}, d.Telemetry{{end}}, recoverer(d.Logger, h))
+{{- else}}
+	return requestLogger(d.Logger{{if .Observability}}, d.Telemetry{{end}}, recoverer(d.Logger, mux))
+{{- end}}
 }
 
 // Serve runs the server until ctx is cancelled, then shuts down gracefully.
@@ -61,14 +108,22 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-func requestLogger(base *slog.Logger, next http.Handler) http.Handler {
+func requestLogger(base *slog.Logger{{if .Observability}}, tel *telemetry.Telemetry{{end}}, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		id := logger.RequestIDFrom(r.Header.Get("X-Request-ID"))
 		w.Header().Set("X-Request-ID", id)
+{{- if .Observability}}
+		ctx, end := tel.StartRequest(logger.WithRequestID(r.Context(), id), r.Header, r.Method)
+		r = r.WithContext(ctx)
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		end(r.Pattern, rec.status)
+{{- else}}
 		r = r.WithContext(logger.WithRequestID(r.Context(), id))
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
+{{- end}}
 		logger.FromContext(r.Context(), base).Info("request completed",
 			"method", r.Method,
 			"path", r.Pattern,
@@ -89,6 +144,33 @@ func recoverer(base *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
+{{if .Auth -}}
+// requireAuth rejects requests under prefix without a valid bearer token with 401.
+func requireAuth(v *auth.Verifier, prefix string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		claims, err := v.Verify(r.Header.Get("Authorization"))
+		if err != nil {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		ar := r.WithContext(auth.WithClaims(r.Context(), claims))
+		next.ServeHTTP(w, ar)
+		r.Pattern = ar.Pattern // so the request logger sees the matched route
+	})
+}
+
+// me returns who the bearer token belongs to.
+func me(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.FromContext(r.Context())
+	writeJSON(w, http.StatusOK, map[string]string{"subject": claims.Subject})
+}
+
+{{end -}}
 func health(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if d.Health != nil {

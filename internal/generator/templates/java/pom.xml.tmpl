@@ -68,6 +68,39 @@
             <artifactId>{{if eq .Opt.Database "postgresql"}}flyway-database-postgresql{{else}}flyway-mysql{{end}}</artifactId>
         </dependency>
 {{- end}}
+{{- if .Auth}}
+        <!-- Bearer token (JWT) checks for /api/v1; see config/SecurityConfig. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+        </dependency>
+{{- end}}
+{{- if .Observability}}
+        <!-- Prometheus metrics at /metrics and OpenTelemetry tracing. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+{{- end}}
+{{- if .Redis}}
+        <!-- Redis cache for @Cacheable; see config/CacheConfig. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+{{- end}}
 {{- if .Opt.HasExtra "swagger"}}
         <!-- OpenAPI spec at /v3/api-docs, Swagger UI at /swagger-ui.html -->
         <dependency>

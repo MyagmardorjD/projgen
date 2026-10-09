@@ -20,6 +20,15 @@ type Config struct {
 	// MigrateOnStart applies pending migrations before serving (MIGRATE_ON_START, default true).
 	MigrateOnStart bool
 {{- end}}
+{{- if .Auth}}
+	// JWTSecret signs and verifies bearer tokens (HS256, at least 32 bytes). Never log it.
+	JWTSecret   string
+	JWTIssuer   string // checked when set
+	JWTAudience string // checked when set
+{{- end}}
+{{- if .Redis}}
+	RedisURL string // redis://user:password@host:6379/0
+{{- end}}
 }
 
 // Load reads the configuration. Secrets come only from the environment.
@@ -31,6 +40,14 @@ func Load() (Config, error) {
 		LogLevel:    getenv("LOG_LEVEL", "INFO"),
 {{- if .HasDB}}
 		DatabaseURL: os.Getenv("DATABASE_URL"),
+{{- end}}
+{{- if .Auth}}
+		JWTSecret:   os.Getenv("JWT_SECRET"),
+		JWTIssuer:   os.Getenv("JWT_ISSUER"),
+		JWTAudience: os.Getenv("JWT_AUDIENCE"),
+{{- end}}
+{{- if .Redis}}
+		RedisURL: os.Getenv("REDIS_URL"),
 {{- end}}
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
@@ -46,6 +63,16 @@ func Load() (Config, error) {
 {{- if .HasDB}}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
+	}
+{{- end}}
+{{- if .Auth}}
+	if len(c.JWTSecret) < 32 {
+		return Config{}, fmt.Errorf("config: JWT_SECRET is required and must be at least 32 bytes")
+	}
+{{- end}}
+{{- if .Redis}}
+	if c.RedisURL == "" {
+		return Config{}, fmt.Errorf("config: REDIS_URL is required")
 	}
 {{- end}}
 	return c, nil

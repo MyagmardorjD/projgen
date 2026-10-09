@@ -26,3 +26,53 @@ spring:
     # Apply pending migrations from db/migration before serving.
     enabled: ${MIGRATE_ON_START:true}
 {{- end}}
+{{- if .Redis}}
+  data:
+    redis:
+      # Required: redis://user:password@host:6379/0 (rediss:// for TLS).
+      url: ${REDIS_URL}
+  cache:
+    type: redis
+    redis:
+      time-to-live: ${CACHE_TTL:10m}
+      key-prefix: "${spring.application.name}:"
+{{- end}}
+{{- if .Auth}}
+
+app:
+  jwt:
+    # Required, at least 32 bytes. Never commit it.
+    secret: ${JWT_SECRET}
+    # Checked against the token's iss / aud when set.
+    issuer: ${JWT_ISSUER:}
+    audience: ${JWT_AUDIENCE:}
+{{- end}}
+{{- if .Observability}}
+
+management:
+  endpoints:
+    web:
+      # Only Prometheus is exposed, at /metrics; /health is HealthController.
+      base-path: /
+      exposure:
+        include: prometheus
+      path-mapping:
+        prometheus: metrics
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      otlp:
+        # Spans are exported only when TRACING_EXPORT_ENABLED=true.
+        enabled: ${TRACING_EXPORT_ENABLED:false}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped from /metrics, not pushed.
+        enabled: false
+{{- end}}

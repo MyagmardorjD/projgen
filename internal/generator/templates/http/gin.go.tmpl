@@ -11,20 +11,48 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"{{.P.domain.Import}}"
+{{- if .Auth}}
+	"{{.P.auth.Import}}"
+{{- end}}
 	"{{.P.logger.Import}}"
 	{{.P.service.Name}} "{{.P.service.Import}}"
+{{- if .Observability}}
+	"{{.P.telemetry.Import}}"
+{{- end}}
 )
 
 // HealthChecker is implemented by *sql.DB and anything else /health should ping.
 type HealthChecker interface {
 	PingContext(ctx context.Context) error
 }
+{{- if .Redis}}
+
+// HealthChecks pings every checker in order and returns the first error.
+type HealthChecks []HealthChecker
+
+func (hs HealthChecks) PingContext(ctx context.Context) error {
+	for _, h := range hs {
+		if err := h.PingContext(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+{{- end}}
 
 // Deps are the dependencies of the HTTP layer. Health may be nil.
 type Deps struct {
 	Greeter *{{.P.service.Name}}.Greeter
 	Health  HealthChecker
 	Logger  *slog.Logger
+{{- if .Auth}}
+	// Auth checks bearer tokens on /api/v1; nil turns authentication off (tests).
+	Auth *auth.Verifier
+{{- end}}
+{{- if .Observability}}
+	// Telemetry serves /metrics and traces requests; nil turns both off (tests).
+	Telemetry *telemetry.Telemetry
+{{- end}}
 	// projgen:deps (projgen add entity inserts fields here)
 }
 
@@ -32,10 +60,23 @@ type Deps struct {
 func NewRouter(d Deps) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery(), requestLogger(d.Logger))
+	r.Use(gin.Recovery(), requestLogger(d.Logger{{if .Observability}}, d.Telemetry{{end}}))
 	r.GET("/health", health(d))
+{{- if .Observability}}
+	if d.Telemetry != nil {
+		r.GET("/metrics", gin.WrapH(d.Telemetry.MetricsHandler()))
+	}
+{{- end}}
 	v1 := r.Group("/api/v1")
+{{- if .Auth}}
+	if d.Auth != nil {
+		v1.Use(requireAuth(d.Auth))
+	}
+{{- end}}
 	v1.GET("/hello", hello(d))
+{{- if .Auth}}
+	v1.GET("/me", me)
+{{- end}}
 	// projgen:routes (projgen add entity inserts routes here)
 	return r
 }
@@ -55,13 +96,20 @@ func Serve(ctx context.Context, addr string, d Deps) error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-func requestLogger(base *slog.Logger) gin.HandlerFunc {
+func requestLogger(base *slog.Logger{{if .Observability}}, tel *telemetry.Telemetry{{end}}) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		id := logger.RequestIDFrom(c.GetHeader("X-Request-ID"))
 		c.Header("X-Request-ID", id)
+{{- if .Observability}}
+		ctx, end := tel.StartRequest(logger.WithRequestID(c.Request.Context(), id), c.Request.Header, c.Request.Method)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+		end(c.FullPath(), c.Writer.Status())
+{{- else}}
 		c.Request = c.Request.WithContext(logger.WithRequestID(c.Request.Context(), id))
 		c.Next()
+{{- end}}
 		logger.FromContext(c.Request.Context(), base).Info("request completed",
 			"method", c.Request.Method,
 			"path", c.FullPath(),
@@ -70,6 +118,28 @@ func requestLogger(base *slog.Logger) gin.HandlerFunc {
 	}
 }
 
+{{if .Auth -}}
+// requireAuth rejects requests without a valid bearer token with 401.
+func requireAuth(v *auth.Verifier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, err := v.Verify(c.GetHeader("Authorization"))
+		if err != nil {
+			c.Header("WWW-Authenticate", "Bearer")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		c.Request = c.Request.WithContext(auth.WithClaims(c.Request.Context(), claims))
+		c.Next()
+	}
+}
+
+// me returns who the bearer token belongs to.
+func me(c *gin.Context) {
+	claims, _ := auth.FromContext(c.Request.Context())
+	c.JSON(http.StatusOK, gin.H{"subject": claims.Subject})
+}
+
+{{end -}}
 func health(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Health != nil {

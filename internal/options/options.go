@@ -49,6 +49,9 @@ var (
 		{"github-actions", "GitHub Actions"},
 		{"swagger", "OpenAPI (Swagger) spec"},
 		{"migrations", "DB migrations on start (golang-migrate / Flyway)"},
+		{"auth", "JWT authentication for /api/v1 (HS256 bearer tokens)"},
+		{"observability", "Prometheus /metrics and OpenTelemetry tracing"},
+		{"redis", "Redis cache (go-redis / Spring Data Redis)"},
 	}
 )
 

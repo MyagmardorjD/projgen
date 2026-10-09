@@ -1,0 +1,72 @@
+package {{.P.config.Name}};
+
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.web.SecurityFilterChain;
+
+/**
+ * Every route under /api/v1 needs a bearer token: an HS256 JWT with sub and
+ * exp, signed with JWT_SECRET by your identity service. Everything else
+ * (/health{{if .Observability}}, /metrics{{end}}{{if .Opt.HasExtra "swagger"}}, Swagger UI{{end}}) stays public.
+ */
+@Configuration
+public class SecurityConfig {
+
+    static final int MIN_SECRET_BYTES = 32;
+
+    @Bean
+    SecurityFilterChain api(HttpSecurity http) throws Exception {
+        http
+                // Stateless bearer-token API: no session, no cookies, so no CSRF token.
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(a -> a
+                        .requestMatchers("/api/v1/**").authenticated()
+                        .anyRequest().permitAll())
+                .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
+        return http.build();
+    }
+
+    @Bean
+    JwtDecoder jwtDecoder(@Value("${app.jwt.secret}") String secret,
+            @Value("${app.jwt.issuer:}") String issuer,
+            @Value("${app.jwt.audience:}") String audience) {
+        byte[] bytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length < MIN_SECRET_BYTES) {
+            throw new IllegalStateException("JWT_SECRET must be at least " + MIN_SECRET_BYTES + " bytes");
+        }
+        SecretKey key = new SecretKeySpec(bytes, "HmacSHA256");
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+
+        List<OAuth2TokenValidator<Jwt>> validators = new ArrayList<>();
+        validators.add(issuer.isBlank() ? JwtValidators.createDefault() : JwtValidators.createDefaultWithIssuer(issuer));
+        validators.add(new JwtClaimValidator<Instant>(JwtClaimNames.EXP, Objects::nonNull));
+        validators.add(new JwtClaimValidator<String>(JwtClaimNames.SUB, sub -> sub != null && !sub.isBlank()));
+        if (!audience.isBlank()) {
+            validators.add(new JwtClaimValidator<List<String>>(JwtClaimNames.AUD, aud -> aud != null && aud.contains(audience)));
+        }
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(validators));
+        return decoder;
+    }
+}

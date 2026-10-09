@@ -6,7 +6,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+{{- if .Observability}}
+	"time"
+{{- end}}
 
+{{- if .Auth}}
+	"{{.P.auth.Import}}"
+{{- end}}
+{{- if .Redis}}
+	"{{.P.cache.Import}}"
+{{- end}}
 	"{{.P.config.Import}}"
 {{- if .HasDB}}
 	{{.P.db.Name}} "{{.P.db.Import}}"
@@ -14,6 +23,9 @@ import (
 	{{.P.http.Name}} "{{.P.http.Import}}"
 	"{{.P.logger.Import}}"
 	{{.P.service.Name}} "{{.P.service.Import}}"
+{{- if .Observability}}
+	"{{.P.telemetry.Import}}"
+{{- end}}
 )
 
 func main() {
@@ -34,10 +46,38 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+{{- if .Observability}}
+
+	shutdownTracing, err := telemetry.SetupTracing(ctx, cfg.ServiceName, cfg.Env, sys)
+	if err != nil {
+		sys.Error("tracing setup failed", "error", err)
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(flushCtx); err != nil {
+			sys.Warn("tracing flush failed", "error", err)
+		}
+	}()
+{{- end}}
+
 	deps := {{.P.http.Name}}.Deps{
 		Greeter: {{.P.service.Name}}.NewGreeter(),
 		Logger:  log,
 	}
+{{- if .Observability}}
+	deps.Telemetry = telemetry.New(cfg.ServiceName)
+{{- end}}
+{{- if .Auth}}
+
+	verifier, err := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
+	if err != nil {
+		sys.Error("auth setup failed", "error", err)
+		return err
+	}
+	deps.Auth = verifier
+{{- end}}
 {{- if .HasDB}}
 {{- if .Migrations}}
 
@@ -57,6 +97,21 @@ func run() error {
 	}
 	defer conn.Close()
 	deps.Health = conn
+{{- end}}
+{{- if .Redis}}
+
+	redisCache, err := cache.Open(cfg.RedisURL, cfg.ServiceName)
+	if err != nil {
+		sys.Error("cache open failed", "error", err)
+		return err
+	}
+	defer redisCache.Close()
+{{- if .HasDB}}
+	deps.Health = {{.P.http.Name}}.HealthChecks{conn, redisCache}
+{{- else}}
+	deps.Health = redisCache
+{{- end}}
+	// Pass redisCache to the services that need it.
 {{- end}}
 
 	// projgen:wire (projgen add entity inserts wiring here)

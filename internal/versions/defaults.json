@@ -6,11 +6,19 @@
     "github.com/gofiber/fiber/v2": "v2.52.15",
     "github.com/jackc/pgx/v5": "v5.11.0",
     "github.com/go-sql-driver/mysql": "v1.10.1",
-    "github.com/golang-migrate/migrate/v4": "v4.20.1"
+    "github.com/golang-migrate/migrate/v4": "v4.20.1",
+    "github.com/golang-jwt/jwt/v5": "v5.3.1",
+    "github.com/redis/go-redis/v9": "v9.23.0",
+    "github.com/prometheus/client_golang": "v1.25.0",
+    "go.opentelemetry.io/otel": "v1.47.0",
+    "go.opentelemetry.io/otel/sdk": "v1.47.0",
+    "go.opentelemetry.io/otel/trace": "v1.47.0",
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp": "v1.47.0"
   },
   "images": {
     "postgres": "18-alpine",
-    "mysql": "9.7"
+    "mysql": "9.7",
+    "redis": "8-alpine"
   },
   "actions": {
     "actions/checkout": "v7",

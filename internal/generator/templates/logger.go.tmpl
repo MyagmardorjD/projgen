@@ -1,6 +1,9 @@
 // Package logger writes structured JSON logs in the team format:
 // @timestamp, level, message (constant), service, env, request_id, logger.
 // Dynamic values always go in separate snake_case fields, never in message.
+{{- if .Observability}}
+// Request logs also carry trace_id and span_id when the request is traced.
+{{- end}}
 package logger
 
 import (
@@ -11,6 +14,10 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+{{- if .Observability}}
+
+	"go.opentelemetry.io/otel/trace"
+{{- end}}
 )
 
 type ctxKey struct{}
@@ -58,12 +65,18 @@ func RequestID(ctx context.Context) string {
 	return id
 }
 
-// FromContext returns base with the request_id field of ctx.
+// FromContext returns base with the request_id field of ctx{{if .Observability}}, plus
+// trace_id and span_id when ctx holds a span{{end}}.
 func FromContext(ctx context.Context, base *slog.Logger) *slog.Logger {
 	id := RequestID(ctx)
 	if id == "" {
 		id = "unknown"
 	}
+{{- if .Observability}}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		return base.With("request_id", id, "trace_id", sc.TraceID().String(), "span_id", sc.SpanID().String())
+	}
+{{- end}}
 	return base.With("request_id", id)
 }
 

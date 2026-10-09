@@ -1,0 +1,14 @@
+package {{.P.config.Name}};
+
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * Turns on Spring's cache abstraction, backed by Redis (spring.cache.type).
+ * Cache a method's result with @Cacheable("products"); entries expire after
+ * CACHE_TTL (default 10m) and keys are prefixed with the service name.
+ */
+@Configuration
+@EnableCaching
+public class CacheConfig {
+}

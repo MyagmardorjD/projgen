@@ -68,11 +68,22 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval 5s --health-timeout 3s --health-retries 30
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      - name: Generated cache against a real Redis
+        env:
+          PROJGEN_TEST_REDIS_URL: redis://localhost:6379/0
+        run: go test -count=1 -run TestGenerated_RedisCache -v -timeout 10m ./internal/generator
 
       - name: Generated repositories against real databases
         env:

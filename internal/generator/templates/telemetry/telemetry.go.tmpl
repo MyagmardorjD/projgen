@@ -1,0 +1,122 @@
+// Package telemetry records a Prometheus histogram and an OpenTelemetry
+// span for every HTTP request, and serves the metrics at /metrics.
+//
+// Spans are exported with OTLP over HTTP when OTEL_EXPORTER_OTLP_ENDPOINT
+// (or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is set, e.g. http://localhost:4318.
+// Without it, trace context is still read from incoming traceparent headers
+// and written to logs, but nothing is exported.
+package telemetry
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// SetupTracing installs the global trace context propagator and, when an
+// OTLP endpoint is configured, a tracer provider that exports spans. Export
+// errors go to log as JSON. Call the returned function on shutdown to flush
+// pending spans.
+func SetupTracing(ctx context.Context, service, env string, log *slog.Logger) (shutdown func(context.Context) error, err error) {
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		log.Warn("telemetry export failed", "error", err)
+	}))
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") == "" {
+		return func(context.Context) error { return nil }, nil
+	}
+	exp, err := otlptracehttp.New(ctx) // reads the OTEL_EXPORTER_OTLP_* variables
+	if err != nil {
+		return nil, err
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithResource(resource.NewSchemaless(
+			attribute.String("service.name", service),
+			attribute.String("deployment.environment.name", env),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+	return tp.Shutdown, nil
+}
+
+// Telemetry measures HTTP requests. Create it after SetupTracing.
+type Telemetry struct {
+	tracer   trace.Tracer
+	registry *prometheus.Registry
+	requests *prometheus.HistogramVec
+}
+
+// New returns a Telemetry with its own metrics registry, which also holds
+// the Go runtime and process metrics.
+func New(service string) *Telemetry {
+	t := &Telemetry{
+		tracer:   otel.Tracer(service),
+		registry: prometheus.NewRegistry(),
+		requests: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Duration of HTTP requests by method, route and status.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"method", "route", "status"}),
+	}
+	t.registry.MustRegister(t.requests, collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	return t
+}
+
+// StartRequest continues the caller's trace from the request headers and
+// starts a server span. Call end once the response is written: it names the
+// span after route, the matched pattern (/api/v1/products/{id}, never the
+// raw path, so the number of metric series stays small), and records the
+// duration. A nil *Telemetry does nothing, so tests can leave it out.
+func (t *Telemetry) StartRequest(ctx context.Context, header http.Header, method string) (_ context.Context, end func(route string, status int)) {
+	if t == nil {
+		return ctx, func(string, int) {}
+	}
+	start := time.Now()
+	// Some frameworks reuse their buffers after the request; keep our own copy.
+	method = strings.Clone(method)
+	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(header))
+	ctx, span := t.tracer.Start(ctx, method, trace.WithSpanKind(trace.SpanKindServer))
+	return ctx, func(route string, status int) {
+		// net/http patterns start with the method: "GET /api/v1/hello".
+		if m, rest, ok := strings.Cut(route, " "); ok && m == method {
+			route = rest
+		}
+		route = strings.Clone(route)
+		if route == "" {
+			route = "unmatched"
+		}
+		span.SetName(method + " " + route)
+		span.SetAttributes(
+			attribute.String("http.request.method", method),
+			attribute.String("http.route", route),
+			attribute.Int("http.response.status_code", status),
+		)
+		if status >= http.StatusInternalServerError {
+			span.SetStatus(codes.Error, http.StatusText(status))
+		}
+		span.End()
+		t.requests.WithLabelValues(method, route, strconv.Itoa(status)).Observe(time.Since(start).Seconds())
+	}
+}
+
+// MetricsHandler serves the metrics in the Prometheus text format.
+func (t *Telemetry) MetricsHandler() http.Handler {
+	return promhttp.HandlerFor(t.registry, promhttp.HandlerOpts{})
+}
