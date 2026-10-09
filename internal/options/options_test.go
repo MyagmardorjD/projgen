@@ -34,6 +34,8 @@ func TestValidate(t *testing.T) {
 		{"unknown extra", func(o *Options) { o.Extras = []string{"jenkins"} }, "extra \"jenkins\""},
 		{"duplicate extra", func(o *Options) { o.Extras = []string{"docker", "docker"} }, "listed twice"},
 		{"compose without docker", func(o *Options) { o.Extras = []string{"docker-compose"} }, "requires docker"},
+		{"migrations without database", func(o *Options) { o.Database, o.Extras = "none", []string{"migrations"} }, "requires a database"},
+		{"migrations with database", func(o *Options) { o.Extras = []string{"migrations"} }, ""},
 		{"java project", func(o *Options) {
 			o.Language, o.Framework, o.Module = "java", "spring-boot", "com.techpartners.orderservice"
 		}, ""},

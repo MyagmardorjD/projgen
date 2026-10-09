@@ -1,8 +1,8 @@
 name: techpartners-java
-description: TechPartners standard Java service (Spring Boot, Clean, PostgreSQL, Docker, GitLab CI)
+description: TechPartners standard Java service (Spring Boot, Clean, PostgreSQL, Docker, GitLab CI, migrations)
 language: java
 framework: spring-boot
 architecture: clean
 database: postgresql
-extras: [docker, docker-compose, gitlab-ci, swagger]
+extras: [docker, docker-compose, gitlab-ci, swagger, migrations]
 module_prefix: com.techpartners

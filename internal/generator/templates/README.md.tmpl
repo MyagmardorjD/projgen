@@ -57,6 +57,22 @@ go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
 {{- if .HasDB}}
 | DATABASE_URL | (required) | Never commit real credentials |
 {{- end}}
+{{- if .Migrations}}
+| MIGRATE_ON_START | true | Apply pending migrations before serving |
+
+## Migrations
+
+SQL files in `migrations/` (`<version>_<name>.up.sql` / `.down.sql`) are embedded into the binary
+and applied with golang-migrate when the service starts. Versions run in numeric order and
+applied ones are recorded in the `schema_migrations` table.
+`projgen add entity` writes its table's migration here, so it runs on the next start.
+
+Test them against a throwaway database:
+
+```bash
+TEST_DATABASE_URL=... go test -run 'Migrate|Repository' ./...
+```
+{{- end}}
 
 ## Logging
 

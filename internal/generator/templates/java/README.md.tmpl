@@ -58,6 +58,20 @@ API docs: http://localhost:8080/swagger-ui.html (spec at `/v3/api-docs`).
 | DATABASE_URL | (required) | JDBC URL, e.g. `{{.DB.JavaLocalURL}}` |
 | DATABASE_USER / DATABASE_PASSWORD | | Never commit real credentials |
 {{- end}}
+{{- if .Migrations}}
+| MIGRATE_ON_START | true | Flyway applies pending migrations before serving |
+
+## Migrations
+
+Flyway applies `src/main/resources/db/migration/V<n>__<name>.sql` on start, in version order,
+and records them in `flyway_schema_history`. Add a new file for every change; never edit an applied one.
+
+Test them against a throwaway database:
+
+```bash
+TEST_DATABASE_URL=jdbc:... TEST_DATABASE_USER=... TEST_DATABASE_PASSWORD=... ./mvnw verify
+```
+{{- end}}
 
 ## Logging
 

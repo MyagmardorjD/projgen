@@ -39,6 +39,16 @@ func run() error {
 		Logger:  log,
 	}
 {{- if .HasDB}}
+{{- if .Migrations}}
+
+	if cfg.MigrateOnStart {
+		if err := {{.P.db.Name}}.Migrate(cfg.DatabaseURL); err != nil {
+			sys.Error("database migration failed", "error", err)
+			return err
+		}
+		sys.Info("database migrated")
+	}
+{{- end}}
 
 	conn, err := {{.P.db.Name}}.Open(cfg.DatabaseURL)
 	if err != nil {

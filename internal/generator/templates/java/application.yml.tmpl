@@ -21,3 +21,8 @@ spring:
     init:
       mode: never
 {{- end}}
+{{- if .Migrations}}
+  flyway:
+    # Apply pending migrations from db/migration before serving.
+    enabled: ${MIGRATE_ON_START:true}
+{{- end}}

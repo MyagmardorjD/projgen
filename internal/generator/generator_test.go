@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,13 +75,21 @@ func opts(fw, arch, db string, extras ...string) options.Options {
 
 var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger"}
 
+// extrasFor returns every extra valid for the database: migrations need one.
+func extrasFor(db string) []string {
+	if db == "none" {
+		return allExtras
+	}
+	return append(slices.Clone(allExtras), "migrations")
+}
+
 // combos returns every framework x architecture x database combination.
 func combos() []options.Options {
 	var out []options.Options
 	for _, fw := range options.Frameworks["go"] {
 		for _, a := range options.Architectures {
 			for _, d := range options.Databases {
-				out = append(out, opts(fw.Value, a.Value, d.Value, allExtras...))
+				out = append(out, opts(fw.Value, a.Value, d.Value, extrasFor(d.Value)...))
 			}
 		}
 	}
@@ -105,7 +114,14 @@ func TestRender_AllCombinations(t *testing.T) {
 				"Dockerfile", "docker-compose.yml", ".gitlab-ci.yml", ".github/workflows/ci.yml", "docs/openapi.yaml",
 			}
 			if o.Database != "none" {
-				want = append(want, d.P["db"].Dir+"/db.go")
+				want = append(want, d.P["db"].Dir+"/db.go", d.P["db"].Dir+"/migrate.go",
+					"migrations/migrations.go", "migrations/"+d.Stamp+"_init.up.sql")
+				if !strings.Contains(string(files["cmd/server/main.go"]), ".Migrate(cfg.DatabaseURL)") {
+					t.Error("main.go does not run migrations")
+				}
+				if !strings.Contains(string(files["go.mod"]), versions.Migrate) {
+					t.Error("go.mod does not require golang-migrate")
+				}
 			}
 			for _, w := range want {
 				if _, ok := files[w]; !ok {

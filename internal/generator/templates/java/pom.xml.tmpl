@@ -57,6 +57,17 @@
             <scope>runtime</scope>
         </dependency>
 {{- end}}
+{{- if .Migrations}}
+        <!-- Flyway applies src/main/resources/db/migration on start. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>{{if eq .Opt.Database "postgresql"}}flyway-database-postgresql{{else}}flyway-mysql{{end}}</artifactId>
+        </dependency>
+{{- end}}
 {{- if .Opt.HasExtra "swagger"}}
         <!-- OpenAPI spec at /v3/api-docs, Swagger UI at /swagger-ui.html -->
         <dependency>

@@ -75,6 +75,8 @@ type Result struct {
 	Modified []string // existing files that were wired up
 	Skipped  []string // shared files that already existed
 	Manual   []string // wiring the developer must add by hand (no markers found)
+
+	AutoMigrate bool // the project applies migrations on start
 }
 
 type outFile struct {
@@ -145,6 +147,7 @@ func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
 		res.Modified = append(res.Modified, e.path)
 	}
 	res.Manual = manual
+	res.AutoMigrate = o.HasExtra("migrations")
 	return res, nil
 }
 

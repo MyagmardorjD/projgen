@@ -92,6 +92,9 @@ func combos() []options.Options {
 					Name: "shop", Module: "example.com/shop", Language: "go",
 					Framework: fw.Value, Architecture: a.Value, Database: d.Value,
 				})
+				if d.Value != "none" {
+					out[len(out)-1].Extras = []string{"migrations"}
+				}
 			}
 		}
 	}
@@ -253,11 +256,11 @@ func TestAdded_RealDatabase(t *testing.T) {
 				t.Skipf("set PROJGEN_TEST_%s_URL to test against a real %s", map[string]string{"postgresql": "POSTGRES", "mysql": "MYSQL"}[db], db)
 			}
 			o := options.Options{Name: "shop", Module: "example.com/shop", Language: "go",
-				Framework: "gin", Architecture: "clean", Database: db}
+				Framework: "gin", Architecture: "clean", Database: db, Extras: []string{"migrations"}}
 			dir := newProject(t, o)
 			mustAdd(t, dir, "Product", testFields)
 			goRun(t, dir, nil, "mod", "tidy")
-			goRun(t, dir, []string{"TEST_DATABASE_URL=" + urls[db]}, "test", "-count=1", "-run", "Repository", "-v", "./...")
+			goRun(t, dir, []string{"TEST_DATABASE_URL=" + urls[db]}, "test", "-count=1", "-run", "Repository|Migrate", "-v", "./...")
 		})
 	}
 }

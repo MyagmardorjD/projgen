@@ -16,6 +16,10 @@ type Config struct {
 {{- if .HasDB}}
 	DatabaseURL string
 {{- end}}
+{{- if .Migrations}}
+	// MigrateOnStart applies pending migrations before serving (MIGRATE_ON_START, default true).
+	MigrateOnStart bool
+{{- end}}
 }
 
 // Load reads the configuration. Secrets come only from the environment.
@@ -32,6 +36,13 @@ func Load() (Config, error) {
 	if _, err := strconv.Atoi(c.Port); err != nil {
 		return Config{}, fmt.Errorf("config: PORT %q is not a number", c.Port)
 	}
+{{- if .Migrations}}
+	migrate, err := strconv.ParseBool(getenv("MIGRATE_ON_START", "true"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: MIGRATE_ON_START %q is not true or false", os.Getenv("MIGRATE_ON_START"))
+	}
+	c.MigrateOnStart = migrate
+{{- end}}
 {{- if .HasDB}}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

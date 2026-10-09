@@ -34,15 +34,16 @@ import (
 
 // Module paths whose latest versions are tracked.
 const (
-	Gin   = "github.com/gin-gonic/gin"
-	Echo  = "github.com/labstack/echo/v4"
-	Fiber = "github.com/gofiber/fiber/v2"
-	Pgx   = "github.com/jackc/pgx/v5"
-	MySQL = "github.com/go-sql-driver/mysql"
+	Gin     = "github.com/gin-gonic/gin"
+	Echo    = "github.com/labstack/echo/v4"
+	Fiber   = "github.com/gofiber/fiber/v2"
+	Pgx     = "github.com/jackc/pgx/v5"
+	MySQL   = "github.com/go-sql-driver/mysql"
+	Migrate = "github.com/golang-migrate/migrate/v4"
 )
 
 // Modules lists every tracked Go module.
-var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL}
+var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL, Migrate}
 
 // Actions lists every tracked GitHub Action.
 var Actions = []string{"actions/checkout", "actions/setup-go", "actions/setup-java"}

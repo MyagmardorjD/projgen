@@ -1,0 +1,48 @@
+package {{.P.db.Name}}
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/golang-migrate/migrate/v4"
+{{- if eq .Opt.Database "postgresql"}}
+	dbdriver "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+{{- else}}
+	dbdriver "github.com/golang-migrate/migrate/v4/database/mysql"
+{{- end}}
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+
+	"{{.Opt.Module}}/migrations"
+)
+
+// Migrate applies every pending migration from the migrations package.
+// It uses its own connection, closed before it returns, and is safe to run
+// on every start: with nothing pending it does nothing.
+func Migrate(url string) error {
+	db, err := sql.Open("{{.DB.Driver}}", url)
+	if err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	src, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("migrate: %w", err)
+	}
+	drv, err := dbdriver.WithInstance(db, &dbdriver.Config{})
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("migrate: %w", err)
+	}
+	m, err := migrate.NewWithInstance("iofs", src, "{{.DB.Driver}}", drv)
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("migrate: %w", err)
+	}
+	defer m.Close() // closes db too
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("migrate up: %w", err)
+	}
+	return nil
+}

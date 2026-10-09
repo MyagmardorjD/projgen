@@ -54,8 +54,10 @@ language: go
 framework: gin            # gin | echo | fiber | nethttp
 architecture: clean       # layered | clean | hexagonal
 database: postgresql      # postgresql | mysql | none
-extras: [docker, docker-compose, gitlab-ci, swagger]   # + github-actions
+extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions
 ```
+
+`migrations` (DB сонгосон үед): асахдаа migration-ийг автоматаар ажиллуулна. Go: `migrations/*.sql`-ийг binary-д суулгаж golang-migrate-ээр, Java: `db/migration/V*.sql`-ийг Flyway-ээр. `MIGRATE_ON_START=false` гэж унтраана. `projgen add entity`-ийн migration ч дараагийн асалтад автоматаар ажиллана.
 
 Java төслийн хувьд:
 
@@ -89,7 +91,7 @@ Preset гурван газраас ачаалагдана. Ижил нэртэй
 
 | Эх үүсвэр | Хаана | Жишээ |
 | --- | --- | --- |
-| Суулгасан | projgen-д | `techpartners-go`, `techpartners-java`, `go-minimal` |
+| Суулгасан | projgen-д | `techpartners-go`, `techpartners-java` (хоёулаа migration-тэй), `go-minimal` |
 | Баг | `PROJGEN_PRESETS` хувьсагчид заасан хавтсууд (`;`-ээр, Linux/macOS дээр `:`-ээр тусгаарлана) | clone хийсэн багийн repo, хуваалцсан диск |
 | Хэрэглэгч | `%APPDATA%\projgen\presets` (Linux: `~/.config/projgen/presets`) | `projgen preset save`-ээр хадгалсан |
 

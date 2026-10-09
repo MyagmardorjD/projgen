@@ -1,0 +1,33 @@
+package {{.P.db.Name}};
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+/**
+ * Starts the application against TEST_DATABASE_URL (a JDBC URL, with
+ * TEST_DATABASE_USER and TEST_DATABASE_PASSWORD) so Flyway applies every
+ * migration to a real database. Use a throwaway database. Skipped when the
+ * variable is not set.
+ */
+@EnabledIfEnvironmentVariable(named = "TEST_DATABASE_URL", matches = ".+")
+@SpringBootTest(properties = {
+        "spring.datasource.url=${TEST_DATABASE_URL}",
+        "spring.datasource.username=${TEST_DATABASE_USER:}",
+        "spring.datasource.password=${TEST_DATABASE_PASSWORD:}",
+})
+class MigrationTests {
+
+    @Autowired
+    private Flyway flyway;
+
+    @Test
+    void allMigrationsApplied() {
+        assertThat(flyway.info().applied()).isNotEmpty();
+        assertThat(flyway.info().pending()).isEmpty();
+    }
+}

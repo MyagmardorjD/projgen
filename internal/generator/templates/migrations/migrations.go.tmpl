@@ -1,0 +1,11 @@
+// Package migrations embeds the SQL migrations into the binary, so the
+// service can migrate its database on start without extra files.
+//
+// Files are named <version>_<name>.up.sql and <version>_<name>.down.sql;
+// versions run in numeric order.
+package migrations
+
+import "embed"
+
+//go:embed *.sql
+var FS embed.FS

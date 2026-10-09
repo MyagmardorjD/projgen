@@ -343,7 +343,12 @@ func cmdAdd(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "\nNext steps:")
 	for _, f := range res.Created {
-		if strings.HasSuffix(f, ".up.sql") {
+		if !strings.HasSuffix(f, ".up.sql") {
+			continue
+		}
+		if res.AutoMigrate {
+			fmt.Fprintf(out, "  %s is applied on the next start (MIGRATE_ON_START=true)\n", f)
+		} else {
 			fmt.Fprintf(out, "  apply the migration: %s\n", f)
 		}
 	}

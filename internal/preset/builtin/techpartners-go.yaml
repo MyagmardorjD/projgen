@@ -1,7 +1,7 @@
 name: techpartners-go
-description: TechPartners standard Go service (Gin, Clean, PostgreSQL, Docker, GitLab CI)
+description: TechPartners standard Go service (Gin, Clean, PostgreSQL, Docker, GitLab CI, migrations)
 language: go
 framework: gin
 architecture: clean
 database: postgresql
-extras: [docker, docker-compose, gitlab-ci, swagger]
+extras: [docker, docker-compose, gitlab-ci, swagger, migrations]

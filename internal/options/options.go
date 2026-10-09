@@ -48,6 +48,7 @@ var (
 		{"gitlab-ci", "GitLab CI"},
 		{"github-actions", "GitHub Actions"},
 		{"swagger", "OpenAPI (Swagger) spec"},
+		{"migrations", "DB migrations on start (golang-migrate / Flyway)"},
 	}
 )
 
@@ -148,6 +149,9 @@ func (o Options) Validate() error {
 	}
 	if o.HasExtra("docker-compose") && !o.HasExtra("docker") {
 		errs = append(errs, errors.New("extra docker-compose requires docker (compose builds the Dockerfile)"))
+	}
+	if o.HasExtra("migrations") && o.Database == "none" {
+		errs = append(errs, errors.New("extra migrations requires a database"))
 	}
 	return errors.Join(errs...)
 }

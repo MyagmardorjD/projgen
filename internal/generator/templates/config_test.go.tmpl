@@ -42,10 +42,35 @@ func TestLoad(t *testing.T) {
 			wantErr: "DATABASE_URL",
 		},
 {{- end}}
+{{- if .Migrations}}
+		{
+			name: "migrate on start by default",
+			env:  map[string]string{"DATABASE_URL": "test-dsn"},
+			check: func(t *testing.T, c Config) {
+				if !c.MigrateOnStart {
+					t.Error("MigrateOnStart should default to true")
+				}
+			},
+		},
+		{
+			name: "migrate on start off",
+			env:  map[string]string{"DATABASE_URL": "test-dsn", "MIGRATE_ON_START": "false"},
+			check: func(t *testing.T, c Config) {
+				if c.MigrateOnStart {
+					t.Error("MigrateOnStart should be false")
+				}
+			},
+		},
+		{
+			name:    "migrate on start invalid",
+			env:     map[string]string{"DATABASE_URL": "test-dsn", "MIGRATE_ON_START": "maybe"},
+			wantErr: "MIGRATE_ON_START",
+		},
+{{- end}}
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"PORT", "APP_ENV", "SERVICE_NAME", "LOG_LEVEL", "DATABASE_URL"} {
+			for _, k := range []string{"PORT", "APP_ENV", "SERVICE_NAME", "LOG_LEVEL", "DATABASE_URL", "MIGRATE_ON_START"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {

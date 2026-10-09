@@ -1,0 +1,34 @@
+package {{.P.db.Name}}
+
+import (
+	"os"
+	"testing"
+)
+
+// TestMigrate runs every migration against TEST_DATABASE_URL, twice, to show
+// it works on a real database and is safe to repeat. Use a throwaway
+// database: the migrations are applied to it. Skipped without the variable.
+func TestMigrate(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run migrations against a real database")
+	}
+	for i := range 2 {
+		if err := Migrate(url); err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+	}
+
+	db, err := Open(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var dirty bool
+	if err := db.QueryRow("SELECT dirty FROM schema_migrations").Scan(&dirty); err != nil {
+		t.Fatalf("schema_migrations: %v", err)
+	}
+	if dirty {
+		t.Error("schema_migrations is dirty")
+	}
+}

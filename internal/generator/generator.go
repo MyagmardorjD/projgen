@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"text/template"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -81,6 +82,9 @@ type Data struct {
 	DB       DB
 	V        versions.Versions
 	Requires []Require
+
+	Migrations bool   // the migrations extra is chosen
+	Stamp      string // generation time, used to name the first migration
 
 	Java    bool   // language is java
 	BasePkg string // Java base package (module)
@@ -179,13 +183,17 @@ func NewData(o options.Options, v versions.Versions) Data {
 		name := strings.ReplaceAll(v[1], "{db}", dbShort)
 		p[comp] = Pkg{Dir: dir, Name: name, Import: o.Module + "/" + dir}
 	}
-	d := Data{Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], V: v}
+	d := Data{Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], V: v,
+		Migrations: o.HasExtra("migrations"), Stamp: time.Now().UTC().Format("20060102150405")}
 	if m, ok := frameworkModules[o.Framework]; ok {
 		d.Requires = append(d.Requires, Require{m, v.Modules[m]})
 	}
 	if d.HasDB {
 		d.DB.Image += ":" + v.Images[d.DB.Image]
 		d.Requires = append(d.Requires, Require{d.DB.Module, v.Modules[d.DB.Module]})
+	}
+	if d.Migrations {
+		d.Requires = append(d.Requires, Require{versions.Migrate, v.Modules[versions.Migrate]})
 	}
 	return d
 }
@@ -201,7 +209,8 @@ func newJavaData(o options.Options, v versions.Versions) Data {
 	}
 	d := Data{
 		Opt: o, P: p, HasDB: o.Database != "none", DB: databases[o.Database], V: v,
-		Java: true, BasePkg: o.Module, BaseDir: baseDir, App: className(o.Name) + "Application",
+		Migrations: o.HasExtra("migrations"),
+		Java:       true, BasePkg: o.Module, BaseDir: baseDir, App: className(o.Name) + "Application",
 	}
 	if d.HasDB {
 		d.DB.Image += ":" + v.Images[d.DB.Image]
@@ -250,6 +259,12 @@ func javaPlan(d Data) []file {
 		{p["http"].TestDir + "/HelloControllerTest.java", "java/HelloControllerTest.java.tmpl", false},
 		{p["http"].TestDir + "/HealthControllerTest.java", "java/HealthControllerTest.java.tmpl", false},
 	}
+	if d.Migrations {
+		files = append(files,
+			file{"src/main/resources/db/migration/V1__init.sql", "migrations/init.up.sql.tmpl", false},
+			file{p["db"].TestDir + "/MigrationTests.java", "java/MigrationTests.java.tmpl", false},
+		)
+	}
 	extras := map[string]file{
 		"docker":         {"Dockerfile", "java/Dockerfile.tmpl", false},
 		"docker-compose": {"docker-compose.yml", "docker-compose.yml.tmpl", false},
@@ -290,6 +305,15 @@ func plan(d Data) []file {
 	if d.HasDB {
 		files = append(files, file{p["db"].Dir + "/db.go", "db.go.tmpl", false})
 	}
+	if d.Migrations {
+		files = append(files,
+			file{"migrations/" + d.Stamp + "_init.up.sql", "migrations/init.up.sql.tmpl", false},
+			file{"migrations/" + d.Stamp + "_init.down.sql", "migrations/init.down.sql.tmpl", false},
+			file{"migrations/migrations.go", "migrations/migrations.go.tmpl", false},
+			file{p["db"].Dir + "/migrate.go", "migrations/migrate.go.tmpl", false},
+			file{p["db"].Dir + "/migrate_test.go", "migrations/migrate_test.go.tmpl", false},
+		)
+	}
 	extras := map[string]file{
 		"docker":         {"Dockerfile", "Dockerfile.tmpl", false},
 		"docker-compose": {"docker-compose.yml", "docker-compose.yml.tmpl", false},
@@ -298,7 +322,9 @@ func plan(d Data) []file {
 		"swagger":        {"docs/openapi.yaml", "openapi.yaml.tmpl", false},
 	}
 	for _, e := range o.Extras {
-		files = append(files, extras[e])
+		if f, ok := extras[e]; ok { // migrations has no single file of its own
+			files = append(files, f)
+		}
 	}
 	return files
 }

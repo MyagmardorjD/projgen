@@ -33,7 +33,7 @@ func javaCombos() []options.Options {
 	var out []options.Options
 	for _, a := range options.Architectures {
 		for _, d := range options.Databases {
-			out = append(out, javaOpts(a.Value, d.Value, allExtras...))
+			out = append(out, javaOpts(a.Value, d.Value, extrasFor(d.Value)...))
 		}
 	}
 	return out
@@ -90,6 +90,12 @@ func TestRenderJava_AllCombinations(t *testing.T) {
 			}
 			if (o.Database != "none") != strings.Contains(pom, "spring-boot-starter-jdbc") {
 				t.Errorf("pom.xml jdbc dependency does not match database=%s", o.Database)
+			}
+			if (o.Database != "none") != strings.Contains(pom, "spring-boot-starter-flyway") {
+				t.Errorf("pom.xml flyway does not match migrations for database=%s", o.Database)
+			}
+			if _, ok := files["src/main/resources/db/migration/V1__init.sql"]; ok != (o.Database != "none") {
+				t.Errorf("V1__init.sql present = %v for database=%s", ok, o.Database)
 			}
 			if !strings.Contains(string(files[".mvn/wrapper/maven-wrapper.properties"]), "apache-maven-"+testV.Java[versions.JavaMaven]) {
 				t.Error("maven-wrapper.properties does not use the Maven version")
@@ -171,4 +177,47 @@ func tail(b []byte, n int) []byte {
 		return b[len(b)-n:]
 	}
 	return b
+}
+
+// TestGeneratedJava_RealDatabase runs ./mvnw verify on a Java project with
+// migrations against real databases, so Flyway applies V1__init.sql
+// (MigrationTests). JDBC URLs come from PROJGEN_TEST_POSTGRES_JDBC and
+// PROJGEN_TEST_MYSQL_JDBC, credentials from PROJGEN_TEST_DB_USER and
+// PROJGEN_TEST_DB_PASSWORD. Needs PROJGEN_E2E_JAVA=1 and a matching JDK.
+func TestGeneratedJava_RealDatabase(t *testing.T) {
+	if os.Getenv("PROJGEN_E2E_JAVA") != "1" {
+		t.Skip("set PROJGEN_E2E_JAVA=1 to build and test generated Java projects")
+	}
+	urls := map[string]string{
+		"postgresql": os.Getenv("PROJGEN_TEST_POSTGRES_JDBC"),
+		"mysql":      os.Getenv("PROJGEN_TEST_MYSQL_JDBC"),
+	}
+	for _, db := range []string{"postgresql", "mysql"} {
+		t.Run(db, func(t *testing.T) {
+			if urls[db] == "" {
+				t.Skipf("no JDBC URL for %s", db)
+			}
+			dir := t.TempDir()
+			if _, err := Generate(javaOpts("clean", db, "migrations"), testV, dir, Flags{}); err != nil {
+				t.Fatal(err)
+			}
+			mvnw := filepath.Join(dir, "mvnw")
+			if runtime.GOOS == "windows" {
+				mvnw = filepath.Join(dir, "mvnw.cmd")
+			}
+			cmd := exec.Command(mvnw, "-B", "-q", "verify")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"TEST_DATABASE_URL="+urls[db],
+				"TEST_DATABASE_USER="+os.Getenv("PROJGEN_TEST_DB_USER"),
+				"TEST_DATABASE_PASSWORD="+os.Getenv("PROJGEN_TEST_DB_PASSWORD"))
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("mvnw verify: %v\n%s", err, tail(out, 6000))
+			}
+			if !bytes.Contains(out, []byte("Migrating schema")) && !bytes.Contains(out, []byte("Successfully applied")) {
+				t.Errorf("Flyway did not report applying migrations:\n%s", tail(out, 3000))
+			}
+		})
+	}
 }
