@@ -99,6 +99,15 @@ type outFile struct {
 // Add generates the entity into the project at dir, which must contain the
 // project.yaml written by projgen.
 func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
+	return add(dir, spec, force, now, true)
+}
+
+// Preview reports what Add would create and change, without writing anything.
+func Preview(dir string, spec Spec, force bool, now time.Time) (Result, error) {
+	return add(dir, spec, force, now, false)
+}
+
+func add(dir string, spec Spec, force bool, now time.Time, write bool) (Result, error) {
 	var res Result
 	o, err := readProject(dir)
 	if err != nil {
@@ -146,6 +155,21 @@ func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
 		}
 	}
 
+	res.AutoMigrate = o.HasExtra("migrations")
+	res.Java = d.Java
+	res.Manual = manual
+	if !write {
+		for _, f := range files {
+			if _, ok := rendered[f.path]; ok {
+				res.Created = append(res.Created, f.path)
+			}
+		}
+		for _, e := range edits {
+			res.Modified = append(res.Modified, e.path)
+		}
+		return res, nil
+	}
+
 	for _, f := range files {
 		b, ok := rendered[f.path]
 		if !ok {
@@ -166,9 +190,6 @@ func Add(dir string, spec Spec, force bool, now time.Time) (Result, error) {
 		}
 		res.Modified = append(res.Modified, e.path)
 	}
-	res.Manual = manual
-	res.AutoMigrate = o.HasExtra("migrations")
-	res.Java = d.Java
 	return res, nil
 }
 

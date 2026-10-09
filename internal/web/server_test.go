@@ -296,3 +296,86 @@ func TestPresets(t *testing.T) {
 		t.Errorf("invalid name status = %d, want 400", r.StatusCode)
 	}
 }
+
+func TestEntity(t *testing.T) {
+	e := newEnv(t)
+	parent := t.TempDir()
+	if r := e.post("/api/create", validReq(parent)); r.StatusCode != http.StatusOK {
+		t.Fatalf("create status = %d", r.StatusCode)
+	}
+	dir := filepath.Join(parent, "web-api")
+	body := map[string]any{
+		"dir":  dir,
+		"name": "Product",
+		"fields": []map[string]any{
+			{"name": "name", "type": "string", "required": true},
+			{"name": "price", "type": "float"},
+		},
+	}
+	type result struct {
+		Created  []string
+		Modified []string
+		Errors   []string
+	}
+
+	t.Run("preview writes nothing", func(t *testing.T) {
+		r := e.post("/api/entity/preview", body)
+		got := decodeBody[result](t, r)
+		if r.StatusCode != http.StatusOK || len(got.Created) == 0 || len(got.Modified) != 2 {
+			t.Fatalf("status = %d, %+v", r.StatusCode, got)
+		}
+		for _, f := range got.Created {
+			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err == nil {
+				t.Errorf("preview wrote %s", f)
+			}
+		}
+	})
+
+	t.Run("add", func(t *testing.T) {
+		r := e.post("/api/entity", body)
+		got := decodeBody[result](t, r)
+		if r.StatusCode != http.StatusOK || len(got.Created) == 0 {
+			t.Fatalf("status = %d, %+v", r.StatusCode, got)
+		}
+		for _, f := range got.Created {
+			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err != nil {
+				t.Errorf("not written: %s", f)
+			}
+		}
+	})
+
+	t.Run("again conflicts", func(t *testing.T) {
+		if r := e.post("/api/entity", body); r.StatusCode != http.StatusConflict {
+			t.Errorf("status = %d, want 409", r.StatusCode)
+		}
+	})
+
+	t.Run("invalid field", func(t *testing.T) {
+		bad := map[string]any{"dir": dir, "name": "Order2", "fields": []map[string]any{{"name": "unitPrice", "type": "float"}}}
+		r := e.post("/api/entity", bad)
+		got := decodeBody[result](t, r)
+		if r.StatusCode != http.StatusBadRequest || !strings.Contains(strings.Join(got.Errors, " "), "snake_case") {
+			t.Errorf("status = %d, errors = %v", r.StatusCode, got.Errors)
+		}
+	})
+
+	t.Run("not a project", func(t *testing.T) {
+		r := e.post("/api/entity/preview", map[string]any{"dir": t.TempDir(), "name": "Product",
+			"fields": []map[string]any{{"name": "name", "type": "string"}}})
+		if r.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", r.StatusCode)
+		}
+	})
+
+	t.Run("needs token", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/api/entity", strings.NewReader("{}"))
+		resp, err := e.srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", resp.StatusCode)
+		}
+	})
+}

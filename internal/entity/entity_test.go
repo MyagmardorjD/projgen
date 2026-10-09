@@ -264,3 +264,26 @@ func TestAdded_RealDatabase(t *testing.T) {
 		})
 	}
 }
+
+func TestPreview_WritesNothing(t *testing.T) {
+	o := combos()[1]
+	dir := newProject(t, o)
+	spec, _ := Parse("Product", testFields)
+	before, _ := os.ReadFile(filepath.Join(dir, "cmd", "server", "main.go"))
+	res, err := Preview(dir, spec, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Created) != 11 || len(res.Modified) != 2 {
+		t.Errorf("preview created = %d, modified = %v; want 11 and router.go, main.go", len(res.Created), res.Modified)
+	}
+	for _, f := range res.Created {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err == nil {
+			t.Errorf("preview wrote %s", f)
+		}
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "cmd", "server", "main.go"))
+	if string(before) != string(after) {
+		t.Error("preview changed main.go")
+	}
+}
