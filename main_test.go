@@ -30,12 +30,14 @@ func fakeHome(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("APPDATA", filepath.Join(home, "AppData"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("PROJGEN_PRESETS", "")
 
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close() // every request now fails to connect
 	old := newFetcher
 	newFetcher = func() *versions.Fetcher {
-		return &versions.Fetcher{Client: &http.Client{Timeout: time.Second}, GoDL: srv.URL, Proxy: srv.URL, DockerHub: srv.URL, GitHub: srv.URL}
+		return &versions.Fetcher{Client: &http.Client{Timeout: time.Second}, GoDL: srv.URL, Proxy: srv.URL,
+			DockerHub: srv.URL, GitHub: srv.URL, Adoptium: srv.URL, Maven: srv.URL}
 	}
 	t.Cleanup(func() { newFetcher = old })
 	return home
@@ -111,8 +113,8 @@ func TestNew_DefaultsToSourceRepos(t *testing.T) {
 func TestNew_InteractiveAsksLocation(t *testing.T) {
 	fakeHome(t)
 	parent := t.TempDir()
-	// name, language, module, location, then defaults for the stack, no extras, confirm.
-	input := "demo-api\n\n\n" + parent + "\n\n\n3\n\ny\n"
+	// preset (custom), name, language, module, location, then defaults for the stack, no extras, confirm.
+	input := "\ndemo-api\n\n\n" + parent + "\n\n\n3\n\ny\n"
 	var out bytes.Buffer
 	if err := run([]string{"new", "--skip-tidy", "--no-git"}, strings.NewReader(input), &out); err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
@@ -135,5 +137,52 @@ func TestNew_OutOverridesDefault(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("dry run output does not show %s:\n%s", want, out.String())
+	}
+}
+
+func TestNew_PresetAndName(t *testing.T) {
+	home := fakeHome(t)
+	var out bytes.Buffer
+	args := []string{"new", "--preset", "techpartners-java", "--name", "pay-api", "--offline", "--no-git"}
+	if err := run(args, strings.NewReader(""), &out); err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+	dir := filepath.Join(home, "source", "repos", "pay-api")
+	b, err := os.ReadFile(filepath.Join(dir, "project.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"language: java", "module: com.techpartners.payapi", "database: postgresql"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("project.yaml missing %q:\n%s", want, b)
+		}
+	}
+}
+
+func TestNew_PresetWithConfigRejected(t *testing.T) {
+	fakeHome(t)
+	err := run([]string{"new", "--preset", "go-minimal", "--config", writeConfig(t)}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPresetSaveAndList(t *testing.T) {
+	fakeHome(t)
+	var out bytes.Buffer
+	if err := run([]string{"preset", "save", "my-team", "--from", writeConfig(t), "--description", "our stack"}, strings.NewReader(""), &out); err != nil {
+		t.Fatalf("save: %v\n%s", err, out.String())
+	}
+	out.Reset()
+	if err := run([]string{"preset", "list"}, strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"my-team", "user", "our stack", "techpartners-go", "built-in"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("list missing %q:\n%s", want, out.String())
+		}
+	}
+	if err := run([]string{"new", "--preset", "unknown"}, strings.NewReader(""), &out); err == nil || !strings.Contains(err.Error(), "my-team") {
+		t.Errorf("unknown preset err = %v, want the available names", err)
 	}
 }

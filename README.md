@@ -72,6 +72,42 @@ database: postgresql
 
 Java төсөлд `RequestIdFilter` хүсэлт бүрт `ThreadContext.put("request_id", ...)` хийж, дараа нь `ThreadContext.clearAll()` хийнэ. Log4j 2-ийн `JsonTemplateLayout` нь `@timestamp`, `level`, `message`, `service`, `env`, `request_id`, `logger` талбартай JSON бичнэ. `pom.xml`-ээс Logback-ийг хасдаг. Swagger сонговол springdoc нэмэгдэнэ (`/swagger-ui.html`).
 
+## Preset (багийн стандарт)
+
+Preset нь хэл, framework, бүтэц, DB, нэмэлтүүд болон module-ийн угтварыг нэрээр нь хадгалсан YAML файл юм. Баг бүх сервисээ нэг ижил стекээр эхлүүлэхэд хэрэглэнэ.
+
+```bash
+projgen preset list                                   # бүх preset
+projgen new --preset techpartners-go                  # зөвхөн нэр, module, байршлыг асууна
+projgen new --preset techpartners-java --name pay-api # юу ч асуухгүй
+projgen preset save backend-go --from project.yaml --description "Backend багийн Go стандарт"
+```
+
+`projgen new`-ийн эхний асуулт нь preset сонголт байна (Enter = бүгдийг өөрөө сонгох). Вэб хуудасны дээд хэсэгт preset сонгох жагсаалт, доод хэсэгт "preset болгон хадгалах" хэсэг бий.
+
+Preset гурван газраас ачаалагдана. Ижил нэртэй бол доорхи нь дээрхийгээ дарна:
+
+| Эх үүсвэр | Хаана | Жишээ |
+| --- | --- | --- |
+| Суулгасан | projgen-д | `techpartners-go`, `techpartners-java`, `go-minimal` |
+| Баг | `PROJGEN_PRESETS` хувьсагчид заасан хавтсууд (`;`-ээр, Linux/macOS дээр `:`-ээр тусгаарлана) | clone хийсэн багийн repo, хуваалцсан диск |
+| Хэрэглэгч | `%APPDATA%\projgen\presets` (Linux: `~/.config/projgen/presets`) | `projgen preset save`-ээр хадгалсан |
+
+Preset файлын жишээ (`backend-go.yaml`):
+
+```yaml
+name: backend-go
+description: Backend багийн Go стандарт
+language: go
+framework: echo
+architecture: hexagonal
+database: postgresql
+extras: [docker, docker-compose, gitlab-ci]
+module_prefix: gitlab.techpartners.asia/backend   # module = <prefix>/<нэр>
+```
+
+Багтай хуваалцахын тулд preset файлуудаа нэг git repo-д хийж, гишүүн бүр clone хийгээд `PROJGEN_PRESETS`-д тэр хавтсыг заана. Буруу preset файл байвал алгасаж, анхааруулга хэвлэнэ.
+
 ## Entity нэмэх (CRUD)
 
 Үүссэн төслийн хавтсанд:

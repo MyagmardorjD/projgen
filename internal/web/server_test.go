@@ -28,6 +28,9 @@ func newEnv(t *testing.T) *env {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("PROJGEN_PRESETS", "")
 
 	e := &env{t: t}
 	e.s = New(versions.Defaults(), func(v versions.Versions) (versions.Versions, error) {
@@ -254,5 +257,42 @@ func TestUpdateKeepsServingWithWarning(t *testing.T) {
 	}
 	if got.Versions.Rows[0].Version != "1.99" {
 		t.Errorf("go = %s, want refreshed 1.99", got.Versions.Rows[0].Version)
+	}
+}
+
+func TestPresets(t *testing.T) {
+	e := newEnv(t)
+	listNames := func() []string {
+		resp, err := e.srv.Client().Get(e.srv.URL + "/api/options")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		got := decodeBody[struct {
+			Presets []struct{ Name, Source string }
+		}](t, resp)
+		var names []string
+		for _, p := range got.Presets {
+			names = append(names, p.Name+":"+p.Source)
+		}
+		return names
+	}
+	if !strings.Contains(strings.Join(listNames(), ","), "techpartners-go:built-in") {
+		t.Errorf("built-in presets missing: %v", listNames())
+	}
+
+	body := map[string]any{"name": "web-team", "description": "saved from the page", "options": validReq("")["options"]}
+	if r := e.post("/api/presets", body); r.StatusCode != http.StatusOK {
+		t.Fatalf("save status = %d", r.StatusCode)
+	}
+	if !strings.Contains(strings.Join(listNames(), ","), "web-team:user") {
+		t.Errorf("saved preset not listed: %v", listNames())
+	}
+	if r := e.post("/api/presets", body); r.StatusCode != http.StatusBadRequest {
+		t.Errorf("duplicate save status = %d, want 400", r.StatusCode)
+	}
+	body["name"] = "Bad Name"
+	if r := e.post("/api/presets", body); r.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid name status = %d, want 400", r.StatusCode)
 	}
 }

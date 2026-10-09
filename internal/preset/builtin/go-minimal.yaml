@@ -1,0 +1,7 @@
+name: go-minimal
+description: Smallest Go service (standard library, Layered, no database, no extras)
+language: go
+framework: nethttp
+architecture: layered
+database: none
+extras: []

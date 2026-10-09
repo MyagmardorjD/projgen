@@ -76,15 +76,26 @@ var (
 )
 
 // DefaultModule suggests a module (Go) or base package (Java) for a project name.
-func DefaultModule(language, name string) string {
+func DefaultModule(language, name string) string { return ModuleFor(language, "", name) }
+
+// ModuleFor builds a module (Go: prefix/name) or base package (Java:
+// prefix.name) from a prefix. An empty prefix uses the default one.
+func ModuleFor(language, prefix, name string) string {
+	prefix = strings.Trim(prefix, "./ ")
 	if language == "java" {
+		if prefix == "" {
+			prefix = "com.techpartners"
+		}
 		pkg := strings.ToLower(regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(name, ""))
 		if pkg == "" || pkg[0] >= '0' && pkg[0] <= '9' {
 			pkg = "app" + pkg
 		}
-		return "com.techpartners." + pkg
+		return prefix + "." + pkg
 	}
-	return "github.com/MyagmardorjD/" + name
+	if prefix == "" {
+		prefix = "github.com/MyagmardorjD"
+	}
+	return prefix + "/" + name
 }
 
 func validModule(language, m string) error {

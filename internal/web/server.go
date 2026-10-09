@@ -32,6 +32,7 @@ import (
 	"github.com/MyagmardorjD/projgen/internal/create"
 	"github.com/MyagmardorjD/projgen/internal/generator"
 	"github.com/MyagmardorjD/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/preset"
 	"github.com/MyagmardorjD/projgen/internal/prompt"
 	"github.com/MyagmardorjD/projgen/internal/versions"
 )
@@ -87,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/create", s.create)
 	mux.HandleFunc("POST /api/update", s.update)
 	mux.HandleFunc("POST /api/open", s.open)
+	mux.HandleFunc("POST /api/presets", s.savePreset)
 	return s.guard(mux)
 }
 
@@ -156,7 +158,8 @@ func (s *Server) current() versions.Versions {
 }
 
 func (s *Server) options(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	presets, err := preset.Load()
+	resp := map[string]any{
 		"languages":      options.Languages,
 		"frameworks":     options.Frameworks,
 		"architectures":  options.Architectures,
@@ -165,7 +168,32 @@ func (s *Server) options(w http.ResponseWriter, _ *http.Request) {
 		"default_parent": create.DefaultParent(),
 		"separator":      string(filepath.Separator),
 		"versions":       rows(s.current()),
-	})
+		"presets":        presets,
+	}
+	if err != nil {
+		resp["preset_warning"] = err.Error()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// savePreset stores the current choices as the user's preset.
+func (s *Server) savePreset(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Options     options.Options `json:"options"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrors(w, http.StatusBadRequest, errors.New("invalid request body"))
+		return
+	}
+	p := preset.FromOptions(strings.TrimSpace(req.Name), strings.TrimSpace(req.Description), req.Options)
+	path, err := preset.Save(p, false)
+	if err != nil {
+		writeErrors(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"name": p.Name, "path": path})
 }
 
 type request struct {

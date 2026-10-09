@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/MyagmardorjD/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/preset"
 )
 
 // ErrCancelled is returned when the developer does not confirm.
@@ -27,28 +28,56 @@ func New(in io.Reader, out io.Writer) *Prompter {
 	return &Prompter{in: bufio.NewReader(in), out: out}
 }
 
+// Request configures one Ask.
+type Request struct {
+	FixedDir      string          // from --out: skip the location question
+	DefaultParent string          // default folder the project goes into
+	Presets       []preset.Preset // offered first; none = no preset question
+	Preset        *preset.Preset  // from --preset: use it without asking
+}
+
 // Ask walks through every option, shows a summary and asks to confirm.
-// It returns the options and the project directory. When fixedDir is set
-// (from --out) the location question is skipped; otherwise the developer
-// picks a parent folder, defaulting to defaultParent, and the project goes
-// in <parent>/<name>.
-func (p *Prompter) Ask(fixedDir, defaultParent string) (options.Options, string, error) {
+// It returns the options and the project directory, <parent>/<name>.
+// With a preset only the name, module and location are asked.
+func (p *Prompter) Ask(r Request) (options.Options, string, error) {
 	var o options.Options
 	var err error
+
+	chosen := r.Preset
+	if chosen == nil && len(r.Presets) > 0 {
+		cs := []options.Choice{{Value: "", Label: "Custom: choose everything yourself"}}
+		for _, ps := range r.Presets {
+			cs = append(cs, options.Choice{Value: ps.Name, Label: fmt.Sprintf("%s (%s)", ps.Name, ps.Summary())})
+		}
+		pick, err := p.choice("Start from a preset", cs)
+		if err != nil {
+			return o, "", err
+		}
+		for i := range r.Presets {
+			if r.Presets[i].Name == pick {
+				chosen = &r.Presets[i]
+			}
+		}
+	}
 
 	if o.Name, err = p.text("Project name", "my-service"); err != nil {
 		return o, "", err
 	}
-	if o.Language, err = p.choice("Language", options.Languages); err != nil {
+	prefix := ""
+	if chosen != nil {
+		o = chosen.Options(o.Name)
+		prefix = chosen.ModulePrefix
+	} else if o.Language, err = p.choice("Language", options.Languages); err != nil {
 		return o, "", err
 	}
 	moduleLabel := "Go module path"
 	if o.Language == "java" {
 		moduleLabel = "Java base package"
 	}
-	if o.Module, err = p.text(moduleLabel, options.DefaultModule(o.Language, o.Name)); err != nil {
+	if o.Module, err = p.text(moduleLabel, options.ModuleFor(o.Language, prefix, o.Name)); err != nil {
 		return o, "", err
 	}
+	fixedDir, defaultParent := r.FixedDir, r.DefaultParent
 	dir := fixedDir
 	if dir == "" {
 		parent, err := p.text("Create in folder", defaultParent)
@@ -60,12 +89,19 @@ func (p *Prompter) Ask(fixedDir, defaultParent string) (options.Options, string,
 	if dir, err = filepath.Abs(dir); err != nil {
 		return o, "", err
 	}
-	o, err = p.askStack(o)
+	if chosen == nil {
+		o, err = p.askStack(o)
+	} else {
+		err = o.Validate()
+	}
 	if err != nil {
 		return o, "", err
 	}
 
-	fmt.Fprintf(p.out, "\nSummary\n  name:         %s\n  module:       %s\n  location:     %s\n  language:     %s\n  framework:    %s\n  architecture: %s\n  database:     %s\n  extras:       %s\n",
+	if chosen != nil {
+		fmt.Fprintf(p.out, "\nPreset: %s (%s)", chosen.Name, chosen.Source)
+	}
+	fmt.Fprintf(p.out, "\nSummary\n  name:       %s\n  module:       %s\n  location:     %s\n  language:     %s\n  framework:    %s\n  architecture: %s\n  database:     %s\n  extras:       %s\n",
 		o.Name, o.Module, dir, o.Language, o.Framework, o.Architecture, o.Database, strings.Join(o.Extras, ", "))
 	ok, err := p.text("Create project? (y/n)", "y")
 	if err != nil {

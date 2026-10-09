@@ -29,6 +29,7 @@ import (
 	"github.com/MyagmardorjD/projgen/internal/entity"
 	"github.com/MyagmardorjD/projgen/internal/generator"
 	"github.com/MyagmardorjD/projgen/internal/options"
+	"github.com/MyagmardorjD/projgen/internal/preset"
 	"github.com/MyagmardorjD/projgen/internal/prompt"
 	"github.com/MyagmardorjD/projgen/internal/versions"
 	"github.com/MyagmardorjD/projgen/internal/web"
@@ -62,6 +63,8 @@ func run(args []string, in io.Reader, out io.Writer) error {
 		return nil
 	case "add":
 		return cmdAdd(args[1:], out)
+	case "preset":
+		return cmdPreset(args[1:], out)
 	case "serve":
 		return cmdServe(args[1:], out)
 	case "update":
@@ -88,6 +91,9 @@ Usage:
   projgen add entity NAME FIELD...
                         add a CRUD resource to the project in the current folder
                         FIELD is name:type or name:type:required
+  projgen preset list   show presets (built-in, team folders in PROJGEN_PRESETS, your own)
+  projgen preset save NAME [--from project.yaml] [--description TEXT] [--force]
+                        save a project's choices as your preset
   projgen serve         open the web UI to pick options, download a ZIP or create locally
   projgen list          show supported languages, frameworks, architectures, databases, extras
   projgen update        fetch the latest versions from official sources
@@ -95,6 +101,8 @@ Usage:
   projgen version
 
 Flags for new:
+  --preset NAME   start from a preset; asks only name, module and location
+  --name NAME     with --preset: ask nothing at all
   --config FILE   read choices from a YAML file instead of asking
   --out DIR       project directory; skips the location question
                   (default ~/source/repos/<name>)
@@ -125,13 +133,36 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 	skipTidy := fs.Bool("skip-tidy", false, "")
 	noGit := fs.Bool("no-git", false, "")
 	offline := fs.Bool("offline", false, "")
+	presetName := fs.String("preset", "", "")
+	projectName := fs.String("name", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *cfgPath != "" && *presetName != "" {
+		return errors.New("use either --config or --preset, not both")
 	}
 
 	var o options.Options
 	dir := *outDir
-	if *cfgPath != "" {
+	var chosen *preset.Preset
+	if *presetName != "" {
+		p, err := preset.Find(*presetName)
+		if err != nil {
+			return err
+		}
+		chosen = &p
+	}
+
+	if chosen != nil && *projectName != "" {
+		// Fully non-interactive: preset + name.
+		o = chosen.Options(*projectName)
+		if err := o.Validate(); err != nil {
+			return err
+		}
+		if dir == "" {
+			dir = filepath.Join(create.DefaultParent(), o.Name)
+		}
+	} else if *cfgPath != "" {
 		b, err := os.ReadFile(*cfgPath)
 		if err != nil {
 			return err
@@ -146,8 +177,16 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 			dir = filepath.Join(create.DefaultParent(), o.Name)
 		}
 	} else {
+		req := prompt.Request{FixedDir: dir, DefaultParent: create.DefaultParent(), Preset: chosen}
+		if chosen == nil {
+			presets, loadErr := preset.Load()
+			if loadErr != nil {
+				fmt.Fprintf(out, "warning: some presets could not be loaded:\n%v\n", loadErr)
+			}
+			req.Presets = presets
+		}
 		var err error
-		if o, dir, err = prompt.New(in, out).Ask(dir, create.DefaultParent()); err != nil {
+		if o, dir, err = prompt.New(in, out).Ask(req); err != nil {
 			return err
 		}
 	}
@@ -187,6 +226,66 @@ func cmdNew(args []string, in io.Reader, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "\nNext steps:\n  cd \"%s\"\n  go test ./...\n  go run ./cmd/server\n", dir)
 	return nil
+}
+
+func cmdPreset(args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: projgen preset list | projgen preset save NAME [--from project.yaml] [--description TEXT] [--force]")
+	}
+	switch args[0] {
+	case "list":
+		presets, err := preset.Load()
+		for _, p := range presets {
+			fmt.Fprintf(out, "  %-22s %-9s %s\n", p.Name, p.Source, p.Summary())
+			if p.Description != "" {
+				fmt.Fprintf(out, "  %-22s %-9s %s\n", "", "", p.Description)
+			}
+		}
+		if dir, e := preset.UserDir(); e == nil {
+			fmt.Fprintf(out, "\nYour presets: %s\nTeam folders: PROJGEN_PRESETS=%s\n", dir, strings.Join(preset.TeamDirs(), string(os.PathListSeparator)))
+		}
+		if err != nil {
+			fmt.Fprintf(out, "\nwarning: some presets could not be loaded:\n%v\n", err)
+		}
+		return nil
+	case "save":
+		fs := flag.NewFlagSet("preset save", flag.ContinueOnError)
+		fs.SetOutput(out)
+		from := fs.String("from", "project.yaml", "")
+		description := fs.String("description", "", "")
+		force := fs.Bool("force", false, "")
+		// Accept the name before or after the flags.
+		var name string
+		rest := args[1:]
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+			name, rest = rest[0], rest[1:]
+		}
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if name == "" && fs.NArg() > 0 {
+			name = fs.Arg(0)
+		}
+		if name == "" {
+			return errors.New("missing preset name")
+		}
+		b, err := os.ReadFile(*from)
+		if err != nil {
+			return err
+		}
+		var o options.Options
+		if err := yaml.Unmarshal(b, &o); err != nil {
+			return fmt.Errorf("%s: %w", *from, err)
+		}
+		p := preset.FromOptions(name, *description, o)
+		path, err := preset.Save(p, *force)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Saved preset %s (%s) to %s\nShare it with your team by putting the file in a folder listed in PROJGEN_PRESETS.\n", p.Name, p.Summary(), path)
+		return nil
+	}
+	return fmt.Errorf("unknown preset command %q (use list or save)", args[0])
 }
 
 func cmdAdd(args []string, out io.Writer) error {
