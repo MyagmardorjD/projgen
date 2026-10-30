@@ -1,0 +1,15 @@
+// Package {{.P.payment.Name}} builds the payment gateway clients from the
+// configuration:
+{{- if .QPay}}
+//   - QPay V2 (github.com/techpartners-asia/qpay-go)
+{{- end}}
+{{- if .Bonum}}
+//   - Bonum (github.com/techpartners-asia/bonum-go)
+{{- end}}
+{{- if .Golomt}}
+//   - Golomt Bank eCommerce and SocialPay (github.com/techpartners-asia/golomt-api-go)
+{{- end}}
+//
+// Pass the clients to the services that take payments. Never log the
+// credentials, tokens or card data that go through them.
+package {{.P.payment.Name}}

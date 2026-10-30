@@ -26,6 +26,29 @@ services:
 {{- if .Redis}}
       REDIS_URL: redis://redis:6379/0
 {{- end}}
+{{- if .QPay}}
+      # No defaults for credentials: put them in .env.
+      QPAY_USERNAME: ${QPAY_USERNAME:?set QPAY_USERNAME in .env}
+      QPAY_PASSWORD: ${QPAY_PASSWORD:?set QPAY_PASSWORD in .env}
+      QPAY_ENDPOINT: ${QPAY_ENDPOINT:-https://merchant-sandbox.qpay.mn/v2}
+      QPAY_CALLBACK_URL: ${QPAY_CALLBACK_URL:?set QPAY_CALLBACK_URL in .env}
+      QPAY_INVOICE_CODE: ${QPAY_INVOICE_CODE:?set QPAY_INVOICE_CODE in .env}
+      QPAY_MERCHANT_ID: ${QPAY_MERCHANT_ID:-}
+{{- end}}
+{{- if .Bonum}}
+      BONUM_ENV: ${BONUM_ENV:-sandbox}
+      BONUM_APP_SECRET: ${BONUM_APP_SECRET:?set BONUM_APP_SECRET in .env}
+      BONUM_TERMINAL_ID: ${BONUM_TERMINAL_ID:?set BONUM_TERMINAL_ID in .env}
+      BONUM_CHECKSUM_KEY: ${BONUM_CHECKSUM_KEY:-}
+{{- end}}
+{{- if .Golomt}}
+      GOLOMT_ECOMMERCE_URL: ${GOLOMT_ECOMMERCE_URL:-https://ecommerce.golomtbank.com}
+      GOLOMT_ECOMMERCE_SECRET: ${GOLOMT_ECOMMERCE_SECRET:-}
+      GOLOMT_ECOMMERCE_TOKEN: ${GOLOMT_ECOMMERCE_TOKEN:-}
+      GOLOMT_SOCIALPAY_URL: ${GOLOMT_SOCIALPAY_URL:-}
+      GOLOMT_SOCIALPAY_TERMINAL: ${GOLOMT_SOCIALPAY_TERMINAL:-}
+      GOLOMT_SOCIALPAY_SECRET: ${GOLOMT_SOCIALPAY_SECRET:-}
+{{- end}}
 {{- if .Observability}}
 {{- if .Java}}
       TRACING_EXPORT_ENABLED: ${TRACING_EXPORT_ENABLED:-false}

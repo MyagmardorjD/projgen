@@ -22,6 +22,9 @@ import (
 {{- end}}
 	{{.P.http.Name}} "{{.P.http.Import}}"
 	"{{.P.logger.Import}}"
+{{- if .Payment}}
+	"{{.P.payment.Import}}"
+{{- end}}
 	{{.P.service.Name}} "{{.P.service.Import}}"
 {{- if .Observability}}
 	"{{.P.telemetry.Import}}"
@@ -112,6 +115,30 @@ func run() error {
 	deps.Health = redisCache
 {{- end}}
 	// Pass redisCache to the services that need it.
+{{- end}}
+{{- if .QPay}}
+
+	qpayClient := {{.P.payment.Name}}.NewQPay(cfg.QPay)
+{{- end}}
+{{- if .Bonum}}
+
+	bonumClient, err := {{.P.payment.Name}}.NewBonum(cfg.Bonum)
+	if err != nil {
+		sys.Error("bonum setup failed", "error", err)
+		return err
+	}
+	defer bonumClient.Close()
+{{- end}}
+{{- if .Golomt}}
+
+	golomtClients := {{.P.payment.Name}}.NewGolomt(cfg.Golomt)
+	sys.Info("golomt configured", "ecommerce", golomtClients.Ecommerce != nil, "socialpay", golomtClients.SocialPay != nil)
+{{- end}}
+{{- if .Payment}}
+	// Pass the payment clients to the services that take payments.
+{{- if .QPay}}
+	_ = qpayClient
+{{- end}}
 {{- end}}
 
 	// projgen:wire (projgen add entity inserts wiring here)

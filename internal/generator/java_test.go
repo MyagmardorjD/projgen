@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,9 @@ func javaCombos() []options.Options {
 	var out []options.Options
 	for _, a := range options.Architectures {
 		for _, d := range options.Databases {
-			out = append(out, javaOpts(a.Value, d.Value, extrasFor(d.Value)...))
+			out = append(out, javaOpts(a.Value, d.Value, slices.DeleteFunc(slices.Clone(extrasFor(d.Value)), func(e string) bool {
+				return slices.Contains(options.GoOnlyExtras, e)
+			})...))
 		}
 	}
 	return out

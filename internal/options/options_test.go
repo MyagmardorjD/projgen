@@ -36,6 +36,7 @@ func TestValidate(t *testing.T) {
 		{"compose without docker", func(o *Options) { o.Extras = []string{"docker-compose"} }, "requires docker"},
 		{"migrations without database", func(o *Options) { o.Database, o.Extras = "none", []string{"migrations"} }, "requires a database"},
 		{"migrations with database", func(o *Options) { o.Extras = []string{"migrations"} }, ""},
+		{"techpartners libraries for go", func(o *Options) { o.Extras = []string{"tp-logger", "qpay", "bonum", "golomt"} }, ""},
 		{"java project", func(o *Options) {
 			o.Language, o.Framework, o.Module = "java", "spring-boot", "com.techpartners.orderservice"
 		}, ""},
@@ -45,6 +46,9 @@ func TestValidate(t *testing.T) {
 		{"java keyword in package", func(o *Options) {
 			o.Language, o.Framework, o.Module = "java", "spring-boot", "com.example.new"
 		}, "Java keyword"},
+		{"go library extra for java", func(o *Options) {
+			o.Language, o.Framework, o.Module, o.Extras = "java", "spring-boot", "com.techpartners.x", []string{"qpay"}
+		}, "extra qpay: available for Go projects only"},
 		{"go framework for java", func(o *Options) {
 			o.Language, o.Module = "java", "com.techpartners.x"
 		}, "not available for java"},

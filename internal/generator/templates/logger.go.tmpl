@@ -4,6 +4,12 @@
 {{- if .Observability}}
 // Request logs also carry trace_id and span_id when the request is traced.
 {{- end}}
+{{- if .TPLogger}}
+//
+// Records are written by github.com/techpartners-asia/logger-go, which masks
+// secret fields (password, token, authorization, card_number, ...) before
+// they reach the output.
+{{- end}}
 package logger
 
 import (
@@ -14,9 +20,13 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+{{- if or .Observability .TPLogger}}
+{{if .TPLogger}}
+	tplog "github.com/techpartners-asia/logger-go"
+{{- end}}
 {{- if .Observability}}
-
 	"go.opentelemetry.io/otel/trace"
+{{- end}}
 {{- end}}
 )
 
@@ -30,6 +40,23 @@ func New(service, env, level string) *slog.Logger {
 
 // NewWithWriter is New with a custom destination, used in tests.
 func NewWithWriter(w io.Writer, service, env, level string) *slog.Logger {
+{{- if .TPLogger}}
+	l, err := tplog.New(
+		tplog.WithOutput(w),
+		tplog.WithFormat(tplog.FormatJSON),
+		tplog.WithLevelString(level),
+		tplog.WithKeyNames(tplog.KeyNames{Time: "@timestamp", Level: "level", Message: "message"}),
+		tplog.WithService(service),
+		tplog.WithEnv(env),
+		tplog.WithRedaction(),
+	)
+	if err != nil {
+		// New fails only when it cannot open an output file, and w is already open.
+		panic(err)
+	}
+	return l.Named("app").Slog()
+}
+{{- else}}
 	var lvl slog.Level
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		lvl = slog.LevelInfo
@@ -37,6 +64,9 @@ func NewWithWriter(w io.Writer, service, env, level string) *slog.Logger {
 	h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl, ReplaceAttr: rename})
 	return slog.New(h).With("service", service, "env", env, "logger", "app")
 }
+{{- end}}
+
+{{- if not .TPLogger}}
 
 func rename(groups []string, a slog.Attr) slog.Attr {
 	if len(groups) > 0 {
@@ -50,6 +80,7 @@ func rename(groups []string, a slog.Attr) slog.Attr {
 	}
 	return a
 }
+{{- end}}
 
 // System tags logs that do not belong to a request (startup, shutdown).
 func System(l *slog.Logger) *slog.Logger { return l.With("request_id", "system") }

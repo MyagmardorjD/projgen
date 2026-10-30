@@ -93,6 +93,12 @@ type Data struct {
 	Sonar         bool   // SonarQube analysis
 	SonarImage    string // SonarScanner CLI docker image with tag
 
+	TPLogger bool // the logger package is backed by techpartners-asia/logger-go
+	QPay     bool // QPay V2 client (techpartners-asia/qpay-go)
+	Bonum    bool // Bonum client (techpartners-asia/bonum-go)
+	Golomt   bool // Golomt eCommerce and SocialPay clients (techpartners-asia/golomt-api-go)
+	Payment  bool // any payment client is chosen, so the payment package is generated
+
 	Java    bool   // language is java
 	BasePkg string // Java base package (module)
 	BaseDir string // Java: src/main/java/<base package path>
@@ -125,6 +131,7 @@ var layouts = map[string]map[string][2]string{
 		"auth":      {"internal/auth", "auth"},
 		"cache":     {"internal/cache", "cache"},
 		"telemetry": {"internal/telemetry", "telemetry"},
+		"payment":   {"internal/payment", "payment"},
 	},
 	"clean": {
 		"config":  {"config", "config"},
@@ -137,6 +144,7 @@ var layouts = map[string]map[string][2]string{
 		"auth":      {"pkg/auth", "auth"},
 		"cache":     {"internal/repository/cache", "cache"},
 		"telemetry": {"pkg/telemetry", "telemetry"},
+		"payment":   {"internal/payment", "payment"},
 	},
 	"hexagonal": {
 		"config":  {"internal/config", "config"},
@@ -149,6 +157,7 @@ var layouts = map[string]map[string][2]string{
 		"auth":      {"internal/adapters/auth", "auth"},
 		"cache":     {"internal/adapters/cache", "cache"},
 		"telemetry": {"pkg/telemetry", "telemetry"},
+		"payment":   {"internal/adapters/payment", "payment"},
 	},
 }
 
@@ -225,13 +234,26 @@ func NewData(o options.Options, v versions.Versions) Data {
 	if d.Observability {
 		mods = append(mods, versions.Prometheus, versions.Otel, versions.OtelOTLP, versions.OtelSDK, versions.OtelTrace)
 	}
+	if d.TPLogger {
+		mods = append(mods, versions.TPLogger)
+	}
+	if d.QPay {
+		mods = append(mods, versions.QPay)
+	}
+	if d.Bonum {
+		mods = append(mods, versions.Bonum)
+	}
+	if d.Golomt {
+		mods = append(mods, versions.Golomt)
+	}
 	for _, m := range mods {
 		d.Requires = append(d.Requires, Require{m, v.Modules[m]})
 	}
 	return d
 }
 
-// setExtras sets the flags for the auth, observability, redis and sonarqube extras.
+// setExtras sets the flags for the auth, observability, redis, sonarqube and
+// TechPartners library extras.
 func (d *Data) setExtras(v versions.Versions) {
 	d.Auth = d.Opt.HasExtra("auth")
 	d.Observability = d.Opt.HasExtra("observability")
@@ -239,6 +261,11 @@ func (d *Data) setExtras(v versions.Versions) {
 	d.RedisImage = "redis:" + v.Images["redis"]
 	d.Sonar = d.Opt.HasExtra("sonarqube")
 	d.SonarImage = versions.SonarScannerImage + ":" + v.Images[versions.SonarScannerImage]
+	d.TPLogger = d.Opt.HasExtra("tp-logger")
+	d.QPay = d.Opt.HasExtra("qpay")
+	d.Bonum = d.Opt.HasExtra("bonum")
+	d.Golomt = d.Opt.HasExtra("golomt")
+	d.Payment = d.QPay || d.Bonum || d.Golomt
 }
 
 func newJavaData(o options.Options, v versions.Versions) Data {
@@ -389,6 +416,21 @@ func plan(d Data) []file {
 			file{p["telemetry"].Dir + "/telemetry.go", "telemetry/telemetry.go.tmpl", false},
 			file{p["telemetry"].Dir + "/telemetry_test.go", "telemetry/telemetry_test.go.tmpl", false},
 		)
+	}
+	if d.Payment {
+		files = append(files, file{p["payment"].Dir + "/doc.go", "payment/doc.go.tmpl", false})
+	}
+	payments := []struct {
+		on   bool
+		name string
+	}{{d.QPay, "qpay"}, {d.Bonum, "bonum"}, {d.Golomt, "golomt"}}
+	for _, pm := range payments {
+		if pm.on {
+			files = append(files,
+				file{p["payment"].Dir + "/" + pm.name + ".go", "payment/" + pm.name + ".go.tmpl", false},
+				file{p["payment"].Dir + "/" + pm.name + "_test.go", "payment/" + pm.name + "_test.go.tmpl", false},
+			)
+		}
 	}
 	extras := map[string]file{
 		"docker":         {"Dockerfile", "Dockerfile.tmpl", false},

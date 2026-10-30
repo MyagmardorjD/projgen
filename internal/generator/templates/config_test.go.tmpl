@@ -3,6 +3,9 @@
 {{- if .HasDB}}{{$req = printf "%s\"DATABASE_URL\": \"test-dsn\", " $req}}{{end -}}
 {{- if .Auth}}{{$req = printf "%s\"JWT_SECRET\": testSecret, " $req}}{{end -}}
 {{- if .Redis}}{{$req = printf "%s\"REDIS_URL\": \"redis://localhost:6379/0\", " $req}}{{end -}}
+{{- if .QPay}}{{$req = printf "%s\"QPAY_USERNAME\": \"test-user\", \"QPAY_PASSWORD\": \"test-password\", \"QPAY_CALLBACK_URL\": \"http://localhost:8080/payments/qpay\", \"QPAY_INVOICE_CODE\": \"TEST_INVOICE\", " $req}}{{end -}}
+{{- if .Bonum}}{{$req = printf "%s\"BONUM_APP_SECRET\": \"test-secret\", \"BONUM_TERMINAL_ID\": \"test-terminal\", " $req}}{{end -}}
+{{- if .Golomt}}{{$req = printf "%s\"GOLOMT_ECOMMERCE_SECRET\": \"test-secret\", \"GOLOMT_ECOMMERCE_TOKEN\": \"test-token\", " $req}}{{end -}}
 package config
 
 import (
@@ -115,11 +118,83 @@ func TestLoad(t *testing.T) {
 			wantErr: "REDIS_URL",
 		},
 {{- end}}
+{{- if .QPay}}
+		{
+			name: "qpay sandbox by default",
+			env:  valid(),
+			check: func(t *testing.T, c Config) {
+				if c.QPay.Endpoint != "https://merchant-sandbox.qpay.mn/v2" || c.QPay.Username != "test-user" {
+					t.Errorf("unexpected qpay settings: endpoint %q, username %q", c.QPay.Endpoint, c.QPay.Username)
+				}
+			},
+		},
+		{
+			name:    "qpay password missing",
+			env:     valid("QPAY_PASSWORD", ""),
+			wantErr: "QPAY_PASSWORD",
+		},
+		{
+			name:    "qpay invoice code missing",
+			env:     valid("QPAY_INVOICE_CODE", ""),
+			wantErr: "QPAY_INVOICE_CODE",
+		},
+{{- end}}
+{{- if .Bonum}}
+		{
+			name: "bonum sandbox by default",
+			env:  valid(),
+			check: func(t *testing.T, c Config) {
+				if c.Bonum.Env != "sandbox" || c.Bonum.TerminalID != "test-terminal" {
+					t.Errorf("unexpected bonum settings: env %q, terminal %q", c.Bonum.Env, c.Bonum.TerminalID)
+				}
+			},
+		},
+		{
+			name:    "bonum env invalid",
+			env:     valid("BONUM_ENV", "live"),
+			wantErr: "BONUM_ENV",
+		},
+		{
+			name:    "bonum app secret missing",
+			env:     valid("BONUM_APP_SECRET", ""),
+			wantErr: "BONUM_APP_SECRET",
+		},
+{{- end}}
+{{- if .Golomt}}
+		{
+			name: "golomt ecommerce only",
+			env:  valid(),
+			check: func(t *testing.T, c Config) {
+				if !c.Golomt.Ecommerce() || c.Golomt.SocialPay() {
+					t.Errorf("want only eCommerce configured: %v %v", c.Golomt.Ecommerce(), c.Golomt.SocialPay())
+				}
+			},
+		},
+		{
+			name: "golomt socialpay only",
+			env: valid("GOLOMT_ECOMMERCE_TOKEN", "", "GOLOMT_SOCIALPAY_URL", "https://socialpay.example.mn",
+				"GOLOMT_SOCIALPAY_TERMINAL", "test-terminal", "GOLOMT_SOCIALPAY_SECRET", "test-secret"),
+			check: func(t *testing.T, c Config) {
+				if c.Golomt.Ecommerce() || !c.Golomt.SocialPay() {
+					t.Errorf("want only SocialPay configured: %v %v", c.Golomt.Ecommerce(), c.Golomt.SocialPay())
+				}
+			},
+		},
+		{
+			name:    "golomt nothing configured",
+			env:     valid("GOLOMT_ECOMMERCE_TOKEN", ""),
+			wantErr: "GOLOMT_",
+		},
+{{- end}}
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, k := range []string{"PORT", "APP_ENV", "SERVICE_NAME", "LOG_LEVEL", "DATABASE_URL", "MIGRATE_ON_START",
-				"JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE", "REDIS_URL"} {
+				"JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE", "REDIS_URL"{{if .QPay}},
+				"QPAY_USERNAME", "QPAY_PASSWORD", "QPAY_ENDPOINT", "QPAY_CALLBACK_URL", "QPAY_INVOICE_CODE", "QPAY_MERCHANT_ID"{{end}}{{if .Bonum}},
+				"BONUM_ENV", "BONUM_APP_SECRET", "BONUM_TERMINAL_ID", "BONUM_CHECKSUM_KEY"{{end}}{{if .Golomt}},
+				"GOLOMT_ECOMMERCE_URL", "GOLOMT_ECOMMERCE_SECRET", "GOLOMT_ECOMMERCE_TOKEN",
+				"GOLOMT_SOCIALPAY_URL", "GOLOMT_SOCIALPAY_TERMINAL", "GOLOMT_SOCIALPAY_SECRET"{{end}}} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {

@@ -1,0 +1,68 @@
+package {{.P.payment.Name}}
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	qpay "github.com/techpartners-asia/qpay-go/qpay_v2"
+
+	"{{.P.config.Import}}"
+)
+
+// tokenMargin renews a QPay token this long before it expires.
+const tokenMargin = time.Minute
+
+// QPay is the QPay V2 client with its access token kept fresh. The SDK leaves
+// tokens to the caller, so call Authorize before each API call:
+//
+//	if err := q.Authorize(ctx); err != nil {
+//		return err
+//	}
+//	inv, err := q.CreateInvoice(qpay.QPayCreateInvoiceInput{...})
+//
+// A call that fails with qpay.ErrUnauthorized can be retried after Reset and
+// Authorize; QPay did not process it.
+type QPay struct {
+	qpay.QPay
+	mu sync.Mutex
+}
+
+// NewQPay returns a client for the merchant in c. It does not call QPay.
+func NewQPay(c config.QPay) *QPay {
+	return &QPay{QPay: qpay.New(c.Username, c.Password, c.Endpoint, c.CallbackURL, c.InvoiceCode, c.MerchantID)}
+}
+
+// Authorize installs a usable access token, refreshing or logging in when
+// the current one is missing or about to expire. It is safe for concurrent use.
+func (q *QPay) Authorize(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	now := time.Now()
+	t := q.Token()
+	if !t.IsZero() && t.ExpiresAt.After(now.Add(tokenMargin)) {
+		return nil
+	}
+	if t.RefreshToken != "" && t.RefreshExpiresAt.After(now.Add(tokenMargin)) {
+		if fresh, err := q.Refresh(ctx, t.RefreshToken); err == nil {
+			q.SetToken(fresh)
+			return nil
+		}
+		// A rejected refresh token falls through to a full login.
+	}
+	fresh, err := q.Login(ctx)
+	if err != nil {
+		return fmt.Errorf("qpay login: %w", err)
+	}
+	q.SetToken(fresh)
+	return nil
+}
+
+// Reset drops the installed token so the next Authorize logs in again.
+func (q *QPay) Reset() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.SetToken(qpay.Token{})
+}

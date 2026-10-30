@@ -1,0 +1,32 @@
+package {{.P.payment.Name}}
+
+import (
+	"testing"
+
+	"{{.P.config.Import}}"
+)
+
+func TestNewGolomt(t *testing.T) {
+	ecom := config.Golomt{EcommerceURL: "https://ecommerce.example.mn", EcommerceSecret: "test-secret", EcommerceToken: "test-token"}
+	social := config.Golomt{SocialPayURL: "https://socialpay.example.mn", SocialPayTerminal: "test-terminal", SocialPaySecret: "test-secret"}
+	both := ecom
+	both.SocialPayURL, both.SocialPayTerminal, both.SocialPaySecret = social.SocialPayURL, social.SocialPayTerminal, social.SocialPaySecret
+
+	tests := []struct {
+		name                  string
+		cfg                   config.Golomt
+		wantEcommerce, wantSP bool
+	}{
+		{"ecommerce", ecom, true, false},
+		{"socialpay", social, false, true},
+		{"both", both, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewGolomt(tt.cfg)
+			if (g.Ecommerce != nil) != tt.wantEcommerce || (g.SocialPay != nil) != tt.wantSP {
+				t.Errorf("ecommerce = %v, socialpay = %v", g.Ecommerce != nil, g.SocialPay != nil)
+			}
+		})
+	}
+}

@@ -48,10 +48,17 @@ const (
 	OtelSDK    = "go.opentelemetry.io/otel/sdk"
 	OtelTrace  = "go.opentelemetry.io/otel/trace"
 	OtelOTLP   = "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+
+	// TechPartners libraries (github.com/techpartners-asia).
+	TPLogger = "github.com/techpartners-asia/logger-go"
+	QPay     = "github.com/techpartners-asia/qpay-go"
+	Bonum    = "github.com/techpartners-asia/bonum-go"
+	Golomt   = "github.com/techpartners-asia/golomt-api-go"
 )
 
 // Modules lists every tracked Go module.
-var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL, Migrate, JWT, Redis, Prometheus, Otel, OtelSDK, OtelTrace, OtelOTLP}
+var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL, Migrate, JWT, Redis, Prometheus, Otel, OtelSDK, OtelTrace, OtelOTLP,
+	TPLogger, QPay, Bonum, Golomt}
 
 // AlpineImages lists the official Docker images tracked by their newest "<major>-alpine" tag.
 var AlpineImages = []string{"postgres", "redis"}
