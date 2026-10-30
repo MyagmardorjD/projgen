@@ -32,6 +32,8 @@ func fakeSources(t *testing.T, broken map[string]bool) *Fetcher {
 		`{"results":[{"name":"9-rc1-alpine"},{"name":"8.8-alpine"},{"name":"8-alpine"},{"name":"7-alpine"},{"name":"alpine"}]}`))
 	mux.HandleFunc("/hub/v2/repositories/library/mysql/tags", reply("mysql",
 		`{"results":[{"name":"latest","digest":"sha256:inno"},{"name":"lts","digest":"sha256:lts"},{"name":"9.9.1","digest":"sha256:lts"},{"name":"9.9","digest":"sha256:lts"},{"name":"9","digest":"sha256:lts"},{"name":"8.4","digest":"sha256:old"},{"name":"10.1","digest":"sha256:inno"}]}`))
+	mux.HandleFunc("/hub/v2/repositories/"+SonarScannerImage+"/tags", reply("sonar-scanner-cli",
+		`{"results":[{"name":"12.3.0.4285_8.1.0"},{"name":"12.3"},{"name":"12"},{"name":"latest"},{"name":"11"}]}`))
 	for _, a := range Actions {
 		mux.HandleFunc("/gh/repos/"+a+"/releases/latest", reply(a, `{"tag_name":"v8.1.0"}`))
 	}
@@ -75,6 +77,9 @@ func TestFetch(t *testing.T) {
 	if v.Images["mysql"] != "9.9" {
 		t.Errorf("mysql = %q, want 9.9 (the lts tag)", v.Images["mysql"])
 	}
+	if v.Images[SonarScannerImage] != "12" {
+		t.Errorf("sonar-scanner-cli = %q, want 12 (newest major)", v.Images[SonarScannerImage])
+	}
 	for _, a := range Actions {
 		if v.Actions[a] != "v8" {
 			t.Errorf("%s = %q, want v8", a, v.Actions[a])
@@ -112,7 +117,7 @@ func TestFetch_PartialFailureKeepsOldValues(t *testing.T) {
 }
 
 func TestFetch_AllFail(t *testing.T) {
-	broken := map[string]bool{"go": true, "postgres": true, "redis": true, "mysql": true, "java lts": true}
+	broken := map[string]bool{"go": true, "postgres": true, "redis": true, "mysql": true, "sonar-scanner-cli": true, "java lts": true}
 	for _, path := range JavaArtifacts {
 		broken[path] = true
 	}
@@ -141,7 +146,7 @@ func TestDefaultsComplete(t *testing.T) {
 			t.Errorf("default for %s missing", m)
 		}
 	}
-	for _, img := range []string{"postgres", "mysql"} {
+	for _, img := range []string{"postgres", "mysql", "redis", SonarScannerImage} {
 		if d.Images[img] == "" {
 			t.Errorf("default image %s missing", img)
 		}

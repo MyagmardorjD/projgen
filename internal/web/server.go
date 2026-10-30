@@ -145,6 +145,7 @@ func rows(v versions.Versions) versionsResp {
 	add("postgres image", v.Images["postgres"], "Docker Hub")
 	add("mysql LTS image", v.Images["mysql"], "Docker Hub")
 	add("redis image", v.Images["redis"], "Docker Hub")
+	add("sonar-scanner-cli image", v.Images[versions.SonarScannerImage], "Docker Hub")
 	for _, a := range versions.Actions {
 		add(a, v.Actions[a], "GitHub")
 	}

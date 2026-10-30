@@ -8,8 +8,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+{{- if .Sonar}}
+    env:
+      # The SonarQube step is skipped until the SONAR_TOKEN secret is set (e.g. on forks).
+      HAS_SONAR_TOKEN: ${{"{{"}} secrets.SONAR_TOKEN != '' {{"}}"}}
+{{- end}}
     steps:
       - uses: actions/checkout@{{index .V.Actions "actions/checkout"}}
+{{- if .Sonar}}
+        with:
+          fetch-depth: 0 # full history for SonarQube blame and new-code detection
+{{- end}}
       - uses: actions/setup-go@{{index .V.Actions "actions/setup-go"}}
         with:
           go-version-file: go.mod
@@ -18,6 +27,14 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out ./...
       - name: Build
         run: go build ./cmd/server
+{{- if .Sonar}}
+      - name: SonarQube scan
+        if: env.HAS_SONAR_TOKEN == 'true'
+        uses: SonarSource/sonarqube-scan-action@{{index .V.Actions "SonarSource/sonarqube-scan-action"}}
+        env:
+          SONAR_TOKEN: ${{"{{"}} secrets.SONAR_TOKEN {{"}}"}}
+          SONAR_HOST_URL: ${{"{{"}} vars.SONAR_HOST_URL || secrets.SONAR_HOST_URL {{"}}"}}
+{{- end}}

@@ -528,6 +528,7 @@ func printVersions(out io.Writer, old, cur versions.Versions) {
 	row("postgres (docker image)", "Docker Hub", old.Images["postgres"], cur.Images["postgres"])
 	row("mysql LTS (docker image)", "Docker Hub", old.Images["mysql"], cur.Images["mysql"])
 	row("redis (docker image)", "Docker Hub", old.Images["redis"], cur.Images["redis"])
+	row("sonar-scanner-cli (docker image)", "Docker Hub", old.Images[versions.SonarScannerImage], cur.Images[versions.SonarScannerImage])
 	for _, a := range versions.Actions {
 		row(a, "GitHub", old.Actions[a], cur.Actions[a])
 	}

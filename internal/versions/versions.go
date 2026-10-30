@@ -56,8 +56,11 @@ var Modules = []string{Gin, Echo, Fiber, Pgx, MySQL, Migrate, JWT, Redis, Promet
 // AlpineImages lists the official Docker images tracked by their newest "<major>-alpine" tag.
 var AlpineImages = []string{"postgres", "redis"}
 
+// SonarScannerImage is the SonarScanner CLI image, tracked by its newest major tag ("12").
+const SonarScannerImage = "sonarsource/sonar-scanner-cli"
+
 // Actions lists every tracked GitHub Action.
-var Actions = []string{"actions/checkout", "actions/setup-go", "actions/setup-java"}
+var Actions = []string{"actions/checkout", "actions/setup-go", "actions/setup-java", "SonarSource/sonarqube-scan-action"}
 
 // Java keys and the Maven Central artifact each one tracks ("lts" comes from Adoptium).
 const (
@@ -66,6 +69,7 @@ const (
 	JavaMaven        = "maven"
 	JavaMavenWrapper = "maven-wrapper"
 	JavaSpringdoc    = "springdoc"
+	JavaJacoco       = "jacoco"
 )
 
 // JavaArtifacts maps a Java key to its Maven Central group/artifact path.
@@ -74,10 +78,11 @@ var JavaArtifacts = map[string]string{
 	JavaMaven:        "org/apache/maven/apache-maven",
 	JavaMavenWrapper: "org/apache/maven/wrapper/maven-wrapper",
 	JavaSpringdoc:    "org/springdoc/springdoc-openapi-starter-webmvc-ui",
+	JavaJacoco:       "org/jacoco/jacoco-maven-plugin",
 }
 
 // JavaKeys lists the Java versions in display order.
-var JavaKeys = []string{JavaLTS, JavaSpringBoot, JavaMaven, JavaMavenWrapper, JavaSpringdoc}
+var JavaKeys = []string{JavaLTS, JavaSpringBoot, JavaMaven, JavaMavenWrapper, JavaSpringdoc, JavaJacoco}
 
 // Versions is one snapshot of technology versions.
 type Versions struct {
@@ -238,6 +243,7 @@ func (f *Fetcher) Fetch(ctx context.Context) (Versions, error) {
 		do(img+" image", func() (string, error) { return f.majorAlpineTag(ctx, img) }, func(s string) { v.Images[img] = s })
 	}
 	do("mysql image", func() (string, error) { return f.mysqlLTSTag(ctx) }, func(s string) { v.Images["mysql"] = s })
+	do("sonar-scanner-cli image", func() (string, error) { return f.majorTag(ctx, SonarScannerImage) }, func(s string) { v.Images[SonarScannerImage] = s })
 	for _, a := range Actions {
 		do(a, func() (string, error) { return f.actionMajor(ctx, a) }, func(s string) { v.Actions[a] = s })
 	}
@@ -247,7 +253,7 @@ func (f *Fetcher) Fetch(ctx context.Context) (Versions, error) {
 	}
 	wg.Wait()
 
-	if len(errs) < 1+len(Modules)+len(AlpineImages)+1+len(Actions)+1+len(JavaArtifacts) {
+	if len(errs) < 1+len(Modules)+len(AlpineImages)+2+len(Actions)+1+len(JavaArtifacts) {
 		v.FetchedAt = time.Now().UTC()
 	}
 	slices.SortFunc(errs, func(a, b error) int { return strings.Compare(a.Error(), b.Error()) })
@@ -316,7 +322,10 @@ type hubTag struct {
 
 func (f *Fetcher) hubTags(ctx context.Context, image, filter string) ([]hubTag, error) {
 	var page struct{ Results []hubTag }
-	url := f.DockerHub + "/v2/repositories/library/" + image + "/tags?page_size=100"
+	if !strings.Contains(image, "/") {
+		image = "library/" + image // official images
+	}
+	url := f.DockerHub + "/v2/repositories/" + image + "/tags?page_size=100"
 	if filter != "" {
 		url += "&name=" + filter
 	}
@@ -344,6 +353,28 @@ func (f *Fetcher) majorAlpineTag(ctx context.Context, image string) (string, err
 		return "", errors.New("no <major>-alpine tag found")
 	}
 	return strconv.Itoa(best) + "-alpine", nil
+}
+
+var majorRe = regexp.MustCompile(`^\d+$`)
+
+// majorTag returns the newest plain "<major>" tag of an image ("12").
+func (f *Fetcher) majorTag(ctx context.Context, image string) (string, error) {
+	tags, err := f.hubTags(ctx, image, "")
+	if err != nil {
+		return "", err
+	}
+	best := -1
+	for _, t := range tags {
+		if majorRe.MatchString(t.Name) {
+			if n, _ := strconv.Atoi(t.Name); n > best {
+				best = n
+			}
+		}
+	}
+	if best < 0 {
+		return "", errors.New("no <major> tag found")
+	}
+	return strconv.Itoa(best), nil
 }
 
 var majorMinorRe = regexp.MustCompile(`^\d+\.\d+$`)

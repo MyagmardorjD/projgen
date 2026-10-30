@@ -18,18 +18,21 @@
   "images": {
     "postgres": "18-alpine",
     "mysql": "9.7",
-    "redis": "8-alpine"
+    "redis": "8-alpine",
+    "sonarsource/sonar-scanner-cli": "12"
   },
   "actions": {
     "actions/checkout": "v7",
     "actions/setup-go": "v7",
-    "actions/setup-java": "v6"
+    "actions/setup-java": "v6",
+    "SonarSource/sonarqube-scan-action": "v8"
   },
   "java": {
     "lts": "25",
     "spring-boot": "4.1.1",
     "maven": "3.10.0",
     "maven-wrapper": "3.3.4",
-    "springdoc": "3.1.1"
+    "springdoc": "3.1.1",
+    "jacoco": "0.8.16"
   }
 }

@@ -1,5 +1,8 @@
 stages:
   - test
+{{- if .Sonar}}
+  - analyze
+{{- end}}
   - build
 
 test:
@@ -10,6 +13,32 @@ test:
     - go vet ./...
     - go test -race -coverprofile=coverage.out ./...
     - go tool cover -func=coverage.out
+{{- if .Sonar}}
+  artifacts:
+    paths:
+      - coverage.out
+{{- end}}
+{{- if .Sonar}}
+
+# Needs the CI/CD variables SONAR_HOST_URL and SONAR_TOKEN (masked); skipped until SONAR_TOKEN is set.
+sonarqube:
+  stage: analyze
+  image:
+    name: {{.SonarImage}}
+    entrypoint: [""]
+  needs: [test]
+  variables:
+    GIT_DEPTH: "0" # full history for SonarQube blame and new-code detection
+    SONAR_USER_HOME: "$CI_PROJECT_DIR/.sonar"
+  cache:
+    key: sonar
+    paths:
+      - .sonar/cache
+  script:
+    - sonar-scanner
+  rules:
+    - if: $SONAR_TOKEN
+{{- end}}
 
 build:
   stage: build
