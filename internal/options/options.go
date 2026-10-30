@@ -52,6 +52,7 @@ var (
 		{"auth", "JWT authentication for /api/v1 (HS256 bearer tokens)"},
 		{"observability", "Prometheus /metrics and OpenTelemetry tracing"},
 		{"redis", "Redis cache (go-redis / Spring Data Redis)"},
+		{"sonarqube", "SonarQube analysis (sonar-project.properties / JaCoCo, CI scan)"},
 	}
 )
 

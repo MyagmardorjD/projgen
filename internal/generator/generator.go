@@ -90,6 +90,8 @@ type Data struct {
 	Observability bool   // Prometheus metrics and OpenTelemetry tracing
 	Redis         bool   // Redis cache
 	RedisImage    string // docker image with tag
+	Sonar         bool   // SonarQube analysis
+	SonarImage    string // SonarScanner CLI docker image with tag
 
 	Java    bool   // language is java
 	BasePkg string // Java base package (module)
@@ -229,12 +231,14 @@ func NewData(o options.Options, v versions.Versions) Data {
 	return d
 }
 
-// setExtras sets the flags for the auth, observability and redis extras.
+// setExtras sets the flags for the auth, observability, redis and sonarqube extras.
 func (d *Data) setExtras(v versions.Versions) {
 	d.Auth = d.Opt.HasExtra("auth")
 	d.Observability = d.Opt.HasExtra("observability")
 	d.Redis = d.Opt.HasExtra("redis")
 	d.RedisImage = "redis:" + v.Images["redis"]
+	d.Sonar = d.Opt.HasExtra("sonarqube")
+	d.SonarImage = versions.SonarScannerImage + ":" + v.Images[versions.SonarScannerImage]
 }
 
 func newJavaData(o options.Options, v versions.Versions) Data {
@@ -323,6 +327,7 @@ func javaPlan(d Data) []file {
 		"gitlab-ci":      {".gitlab-ci.yml", "java/gitlab-ci.yml.tmpl", false},
 		"github-actions": {".github/workflows/ci.yml", "java/github-ci.yml.tmpl", false},
 		// swagger: springdoc serves the spec at /v3/api-docs; it is added in pom.xml.
+		// sonarqube: JaCoCo and the sonar.* properties are added in pom.xml.
 	}
 	for _, e := range o.Extras {
 		if f, ok := extras[e]; ok {
@@ -391,6 +396,7 @@ func plan(d Data) []file {
 		"gitlab-ci":      {".gitlab-ci.yml", "gitlab-ci.yml.tmpl", false},
 		"github-actions": {".github/workflows/ci.yml", "github-ci.yml.tmpl", false},
 		"swagger":        {"docs/openapi.yaml", "openapi.yaml.tmpl", false},
+		"sonarqube":      {"sonar-project.properties", "sonar-project.properties.tmpl", false},
 	}
 	for _, e := range o.Extras {
 		if f, ok := extras[e]; ok { // migrations has no single file of its own

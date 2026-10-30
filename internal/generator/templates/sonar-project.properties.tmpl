@@ -1,0 +1,14 @@
+# SonarQube analysis settings. The server URL and token are never stored here:
+# the scanner reads SONAR_HOST_URL and SONAR_TOKEN from the environment.
+sonar.projectKey={{.Opt.Name}}
+sonar.projectName={{.Opt.Name}}
+sonar.sourceEncoding=UTF-8
+
+sonar.sources=.
+sonar.exclusions=**/*_test.go,**/vendor/**,**/testdata/**,bin/**
+sonar.tests=.
+sonar.test.inclusions=**/*_test.go
+sonar.test.exclusions=**/vendor/**
+
+# Written by: go test -coverprofile=coverage.out ./...
+sonar.go.coverage.reportPaths=coverage.out
