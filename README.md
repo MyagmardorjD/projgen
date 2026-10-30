@@ -22,6 +22,20 @@ go install github.com/MyagmardorjD/projgen@latest
 
 Go-гүй бол (жишээ нь Java баг) [Releases](https://github.com/MyagmardorjD/projgen/releases/latest) хуудаснаас өөрийн платформын архивыг (Windows: `projgen_<хувилбар>_windows_amd64.zip`, Linux/macOS: `.tar.gz`, amd64/arm64) татаж задлаад `projgen`-ийг PATH-д хийнэ. `checksums.txt`-ээр шалгаж болно.
 
+### macOS
+
+Apple Silicon (M1 болон шинэ) бол `darwin_arm64`, Intel бол `darwin_amd64` архивыг авна (`uname -m` нь `arm64` эсвэл `x86_64` гэж хэвлэнэ):
+
+```bash
+tar -xzf projgen_<хувилбар>_darwin_arm64.tar.gz
+xattr -d com.apple.quarantine projgen   # браузераар татсан бол Gatekeeper-ийн хоригийг арилгана
+sudo mv projgen /usr/local/bin/
+```
+
+`xattr` хийхгүй бол macOS "developer cannot be verified" гэж ажиллуулахгүй. `go install`-ээр суулгасан бол хэрэггүй.
+
+VS Code-оор нээх товч `code` командыг ашиглана. Түүнийг PATH-д нэмээгүй бол (VS Code → Command Palette → *Shell Command: Install 'code' command in PATH*) `/Applications` дахь Visual Studio Code-ыг `open -a`-аар нээнэ.
+
 `projgen version` нь хувилбараа хэвлэж, шинэ release гарсан бол мэдэгдэнэ (`--offline` бол шалгахгүй). `projgen update` ч мөн шалгана.
 
 ### Release гаргах
@@ -44,7 +58,7 @@ projgen serve
 Браузерт `http://127.0.0.1:8090` нээгдэнэ. Тэнд:
 
 1. Нэр, framework, архитектур, өгөгдлийн сан, нэмэлтүүдээ сонгоно. Үүсэх файлууд баруун талд шууд харагдана.
-2. **Компьютер дээр үүсгэх** дарвал сонгосон хавтсанд (анхдагч `~/source/repos`) үүсгээд `go mod tidy`, `git init` хийнэ. Дараа нь VS Code эсвэл Explorer-оор нээж болно.
+2. **Компьютер дээр үүсгэх** дарвал сонгосон хавтсанд (анхдагч `~/source/repos`) үүсгээд `go mod tidy`, `git init` хийнэ. Дараа нь VS Code эсвэл файлын менежерээр (Windows: Explorer, macOS: Finder) нээж болно.
 3. Эсвэл **ZIP татах** дарж архиваар авна.
 4. **Шинэчлэх** нь технологийн хувилбаруудыг албан ёсны эх сурвалжаас дахин шалгана.
 5. **Entity нэмэх** хэсэгт төслийн хавтас, entity-ийн нэр, талбаруудыг (нэр, төрөл, required) оруулна. **Урьдчилан харах** нь юу үүсэх, юу өөрчлөгдөхийг юу ч бичихгүйгээр харуулна; **Entity нэмэх** нь `projgen add entity`-тэй ижлээр (Go, Java аль алинд) бичнэ. Төсөл үүсгэсний дараа хавтас нь автоматаар бөглөгдөнө.
@@ -61,7 +75,7 @@ projgen list                         # дэмжигдэх бүх сонголт
 projgen new --out D:\Work\my-api     # хаана үүсгэхийг шууд заана
 ```
 
-Төслийг хаана үүсгэхийг асууна. Enter дарвал `~/source/repos/<нэр>` (Windows дээр `C:\Users\<хэрэглэгч>\source\repos\<нэр>`) дотор үүснэ. `--config`-оор ажиллуулахад ч `--out` өгөөгүй бол мөн энэ хавтас руу үүснэ.
+Төслийг хаана үүсгэхийг асууна. Enter дарвал `~/source/repos/<нэр>` (Windows дээр `C:\Users\<хэрэглэгч>\source\repos\<нэр>`, macOS дээр `/Users/<хэрэглэгч>/source/repos/<нэр>`) дотор үүснэ. `--config`-оор ажиллуулахад ч `--out` өгөөгүй бол мөн энэ хавтас руу үүснэ.
 
 `project.yaml` жишээ:
 
@@ -127,7 +141,17 @@ Preset гурван газраас ачаалагдана. Ижил нэртэй
 | --- | --- | --- |
 | Суулгасан | projgen-д | `techpartners-go`, `techpartners-java` (хоёулаа migration-тэй), `go-minimal` |
 | Баг | `PROJGEN_PRESETS` хувьсагчид заасан хавтсууд (`;`-ээр, Linux/macOS дээр `:`-ээр тусгаарлана) | clone хийсэн багийн repo, хуваалцсан диск |
-| Хэрэглэгч | `%APPDATA%\projgen\presets` (Linux: `~/.config/projgen/presets`) | `projgen preset save`-ээр хадгалсан |
+| Хэрэглэгч | `<тохиргооны хавтас>/projgen/presets` (доорхыг үз) | `projgen preset save`-ээр хадгалсан |
+
+Тохиргооны хавтас (хадгалсан preset, хувилбарын cache) нь үйлдлийн системээс хамаарна:
+
+| OS | Хавтас |
+| --- | --- |
+| Windows | `%APPDATA%\projgen` |
+| macOS | `~/Library/Application Support/projgen` |
+| Linux | `$XDG_CONFIG_HOME/projgen` (анхдагч `~/.config/projgen`) |
+
+macOS дээр `~/.config`-ыг ашиглахгүй. `projgen preset list` хэрэглэгчийн preset-ийн хавтсыг хэвлэнэ.
 
 Preset файлын жишээ (`backend-go.yaml`):
 
@@ -224,7 +248,7 @@ projgen versions   # ашиглагдах хувилбаруудыг харуу�
 projgen new --offline   # шалгахгүй, хадгалсан хувилбараар үүсгэнэ
 ```
 
-`projgen new` хадгалсан хувилбар 24 цагаас хуучин бол автоматаар шалгана. Хувилбарууд `%APPDATA%\projgen\versions.json` (Linux: `~/.config/projgen/`) дотор хадгалагдана. Интернэтгүй үед хадгалсан эсвэл binary-д суулгасан хувилбарыг ашиглаж, анхааруулга хэвлэнэ.
+`projgen new` хадгалсан хувилбар 24 цагаас хуучин бол автоматаар шалгана. Хувилбарууд тохиргооны хавтсын `versions.json`-д (Windows: `%APPDATA%\projgen`, macOS: `~/Library/Application Support/projgen`, Linux: `~/.config/projgen`) хадгалагдана. Интернэтгүй үед хадгалсан эсвэл binary-д суулгасан хувилбарыг ашиглаж, анхааруулга хэвлэнэ.
 
 ## Шинэ framework нэмэх
 

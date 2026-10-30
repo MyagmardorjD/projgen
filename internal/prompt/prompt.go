@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -115,14 +116,20 @@ func (p *Prompter) Ask(r Request) (options.Options, string, error) {
 
 // ExpandHome replaces a leading "~" with the user's home directory.
 func ExpandHome(path string) string {
-	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
-		return path
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return path
 	}
-	return filepath.Join(home, path[1:])
+	return expandHome(path, home, runtime.GOOS)
+}
+
+// expandHome is ExpandHome for a given home directory and OS. "~\" is only
+// a home prefix on Windows; elsewhere a backslash is part of the file name.
+func expandHome(path, home, goos string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") || (goos == "windows" && strings.HasPrefix(path, `~\`)) {
+		return filepath.Join(home, path[1:])
+	}
+	return path
 }
 
 // askStack asks for the technology choices and validates them.
