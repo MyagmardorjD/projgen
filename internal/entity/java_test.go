@@ -84,6 +84,11 @@ func TestAddJava_AllCombinations(t *testing.T) {
 			if !strings.Contains(string(controller), `@RequestMapping("/api/v1/products")`) {
 				t.Error("ProductController is not mapped to /api/v1/products")
 			}
+			// spring-dao (and so the 409 mapping) is only on the classpath with a database.
+			handler, _ := os.ReadFile(filepath.Join(dir, d.P["http"].Dir, "EntityExceptionHandler.java"))
+			if strings.Contains(string(handler), "org.springframework.dao") != (o.Database != "none") {
+				t.Errorf("EntityExceptionHandler imports spring-dao with database %s; want it only with a database", o.Database)
+			}
 			memory := filepath.Join(dir, d.P["db"].Dir, "InMemoryProductRepository.java")
 			if _, err := os.Stat(memory); (err == nil) != (o.Database == "none") {
 				t.Errorf("in-memory repository in main = %v, want it only without a database", err == nil)

@@ -5,7 +5,9 @@ import {{.P.domain.Name}}.ValidationException;
 import java.util.Map;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+{{- if .HasDB}}
 import org.springframework.dao.DataIntegrityViolationException;
+{{- end}}
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -15,7 +17,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 /**
  * Maps entity errors to JSON: 404 not found, 422 validation, 400 bad JSON or
- * id, 409 when a foreign key blocks a write. Runs before
+ * id{{if .HasDB}}, 409 when a foreign key blocks a write{{end}}. Runs before
  * {@link ApiExceptionHandler}, which handles everything else.
  * Shared by every entity; generated once by projgen add entity.
  */
@@ -42,9 +44,11 @@ public class EntityExceptionHandler {
     public ResponseEntity<Map<String, String>> badParameter(MethodArgumentTypeMismatchException e) {
         return ResponseEntity.badRequest().body(Map.of("error", "invalid " + e.getName()));
     }
+{{- if .HasDB}}
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, String>> conflict(DataIntegrityViolationException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "conflict with related records"));
     }
+{{- end}}
 }
