@@ -72,7 +72,7 @@ language: go
 framework: gin            # gin | echo | fiber | nethttp
 architecture: clean       # layered | clean | hexagonal
 database: postgresql      # postgresql | mysql | none
-extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions, auth, observability, redis
+extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions, auth, observability, redis, sonarqube
 ```
 
 `migrations` (DB сонгосон үед): асахдаа migration-ийг автоматаар ажиллуулна. Go: `migrations/*.sql`-ийг binary-д суулгаж golang-migrate-ээр, Java: `db/migration/V*.sql`-ийг Flyway-ээр. `MIGRATE_ON_START=false` гэж унтраана. `projgen add entity`-ийн migration ч дараагийн асалтад автоматаар ажиллана.
@@ -82,8 +82,16 @@ extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-ac
 | `auth` | `/api/v1/*` бүхэлдээ `Authorization: Bearer <JWT>` шаардана (HS256, `sub`+`exp` заавал, `JWT_SECRET` ≥ 32 байт, `JWT_ISSUER`/`JWT_AUDIENCE` сонголттой). golang-jwt, `GET /api/v1/me`, хөгжүүлэлтийн token: `go run ./cmd/token -sub alice` | Spring Security resource server (`SecurityConfig`), `MeController`, бодит сервер дээрх `ServerTests` |
 | `observability` | `GET /metrics` (Prometheus: `http_request_duration_seconds{method,route,status}` + Go runtime), хүсэлт бүрт OpenTelemetry span (`traceparent` үргэлжилнэ), логт `trace_id`/`span_id`. `OTEL_EXPORTER_OTLP_ENDPOINT` өгвөл OTLP/HTTP-ээр илгээнэ | Actuator + Micrometer: `GET /metrics`, OpenTelemetry tracing (`TRACING_EXPORT_ENABLED=true` үед илгээнэ), логт `trace_id`/`span_id` |
 | `redis` | `cache` пакет (go-redis: JSON `Get`/`Set`/`Delete`, TTL, үйлчилгээний нэрийн угтвар), `/health` Redis-ийг ping хийнэ, `TEST_REDIS_URL`-тэй тест | Spring Data Redis + `@EnableCaching` (`@Cacheable`, `CACHE_TTL`), `/health` Redis-ийг ping хийнэ |
+| `sonarqube` | `sonar-project.properties` (project key = төслийн нэр, `sonar.sources`/`sonar.tests`, `*_test.go`-г эх кодоос хасна, `sonar.go.coverage.reportPaths=coverage.out`); CI `go test -coverprofile=coverage.out` ажиллуулна | `pom.xml`-д JaCoCo plugin (`./mvnw verify` → `target/site/jacoco/jacoco.xml`) болон `sonar.projectKey`, `sonar.coverage.jacoco.xmlReportPaths` |
 
 `/health` болон `/metrics` нийтэд нээлттэй хэвээр. Нууц утгуудад анхдагч утга байхгүй (docker-compose ч `JWT_SECRET`-ийг `.env`-ээс шаардана). docker-compose сонгосон бол `redis` service нэмэгдэнэ.
+
+`sonarqube`-ийг `github-actions` эсвэл `gitlab-ci`-тэй хамт сонговол CI-д SonarQube scan алхам нэмэгдэнэ (GitHub: `SonarSource/sonarqube-scan-action` / `sonar-maven-plugin`, GitLab: `analyze` stage дахь `sonarqube` job). Серверийн хаяг, token-ийг зөвхөн CI-ийн нууц утгаас уншина, үүссэн файлд token хэзээ ч бичигдэхгүй:
+
+- GitHub: repository secret `SONAR_TOKEN`, `SONAR_HOST_URL`-ийг repository variable (эсвэл secret) болгоно.
+- GitLab: CI/CD variables `SONAR_HOST_URL`, `SONAR_TOKEN` (masked).
+
+`SONAR_TOKEN` тохируулаагүй үед scan алхам алгасагдана (CI унахгүй). SonarQube дээр төслийн нэртэй ижил key-тэй project үүсгээд token гаргана. Өөрийн машин дээрээс scan хийх заавар үүссэн төслийн `README.md`-ийн "SonarQube" хэсэгт бий (Go: `sonarsource/sonar-scanner-cli` docker image, Java: `./mvnw verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar`).
 
 Java төслийн хувьд:
 

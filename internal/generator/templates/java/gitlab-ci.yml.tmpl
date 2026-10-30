@@ -1,5 +1,8 @@
 stages:
   - test
+{{- if .Sonar}}
+  - analyze
+{{- end}}
   - build
 
 variables:
@@ -15,6 +18,27 @@ test:
   script:
     - chmod +x mvnw
     - ./mvnw -B verify
+{{- if .Sonar}}
+
+# Needs the CI/CD variables SONAR_HOST_URL and SONAR_TOKEN (masked); skipped until SONAR_TOKEN is set.
+sonarqube:
+  stage: analyze
+  image: eclipse-temurin:{{index .V.Java "lts"}}-jdk
+  variables:
+    GIT_DEPTH: "0" # full history for SonarQube blame and new-code detection
+    SONAR_USER_HOME: "$CI_PROJECT_DIR/.sonar"
+  cache:
+    - paths:
+        - .m2/repository
+    - key: sonar
+      paths:
+        - .sonar/cache
+  script:
+    - chmod +x mvnw
+    - ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+  rules:
+    - if: $SONAR_TOKEN
+{{- end}}
 
 build:
   stage: build

@@ -18,6 +18,13 @@
 
     <properties>
         <java.version>{{index .V.Java "lts"}}</java.version>
+{{- if .Sonar}}
+        <!-- SonarQube: the server URL and token come from SONAR_HOST_URL and SONAR_TOKEN,
+             never from this file. -->
+        <sonar.projectKey>{{.Opt.Name}}</sonar.projectKey>
+        <sonar.projectName>{{.Opt.Name}}</sonar.projectName>
+        <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+{{- end}}
     </properties>
 
     <dependencies>
@@ -123,6 +130,35 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+{{- if .Sonar}}
+            <!-- Test coverage for SonarQube: mvnw verify writes target/site/jacoco/jacoco.xml. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>{{index .V.Java "jacoco"}}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <formats>
+                                <format>XML</format>
+                                <format>HTML</format>
+                            </formats>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+{{- end}}
         </plugins>
     </build>
 </project>

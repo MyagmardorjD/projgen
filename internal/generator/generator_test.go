@@ -74,7 +74,7 @@ func opts(fw, arch, db string, extras ...string) options.Options {
 	}
 }
 
-var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger", "auth", "observability", "redis"}
+var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger", "auth", "observability", "redis", "sonarqube"}
 
 // extrasFor returns every extra valid for the database: migrations need one.
 func extrasFor(db string) []string {
@@ -161,7 +161,7 @@ func TestRender_ExtrasOnlyWhenChosen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"Dockerfile", "docker-compose.yml", ".gitlab-ci.yml", ".github/workflows/ci.yml", "docs/openapi.yaml", "internal/repository/db.go"} {
+	for _, p := range []string{"Dockerfile", "docker-compose.yml", ".gitlab-ci.yml", ".github/workflows/ci.yml", "docs/openapi.yaml", "sonar-project.properties", "internal/repository/db.go"} {
 		if _, ok := files[p]; ok {
 			t.Errorf("%s generated but not chosen", p)
 		}
@@ -227,6 +227,81 @@ func TestRender_AuthObservabilityRedis(t *testing.T) {
 		base + "/delivery/web/MeController.java", "src/test/java/com/techpartners/orderservice/ServerTests.java"} {
 		if _, ok := java[f]; !ok {
 			t.Errorf("missing %s", f)
+		}
+	}
+}
+
+// sonarqube adds the scanner settings and, with a CI extra, a scan step that
+// reads the server URL and token from CI secrets only.
+func TestRender_SonarQube(t *testing.T) {
+	goFiles, err := Render(opts("gin", "clean", "postgresql", "github-actions", "gitlab-ci", "sonarqube"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	javaFiles, err := Render(javaOpts("clean", "postgresql", "github-actions", "gitlab-ci", "sonarqube"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := map[string][]string{
+		"sonar-project.properties": {"sonar.projectKey=demo-service\n", "sonar.projectName=demo-service\n",
+			"sonar.sources=.\n", "sonar.tests=.\n", "sonar.test.inclusions=**/*_test.go\n", "sonar.exclusions=**/*_test.go",
+			"sonar.go.coverage.reportPaths=coverage.out\n"},
+		".github/workflows/ci.yml": {"fetch-depth: 0", "go test -race -coverprofile=coverage.out ./...",
+			"uses: SonarSource/sonarqube-scan-action@" + testV.Actions["SonarSource/sonarqube-scan-action"],
+			"SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}", "SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL || secrets.SONAR_HOST_URL }}",
+			"if: env.HAS_SONAR_TOKEN == 'true'"},
+		".gitlab-ci.yml": {"- analyze\n", "- coverage.out\n", "name: " + versions.SonarScannerImage + ":" + testV.Images[versions.SonarScannerImage],
+			"- sonar-scanner\n", "needs: [test]", `GIT_DEPTH: "0"`, "- if: $SONAR_TOKEN\n"},
+		"README.md":  {"## SonarQube", "`SONAR_TOKEN`", "`SONAR_HOST_URL`"},
+		".gitignore": {".scannerwork/\n"},
+	}
+	javaChecks := map[string][]string{
+		"pom.xml": {"<sonar.projectKey>order-service</sonar.projectKey>",
+			"<sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>",
+			"<artifactId>jacoco-maven-plugin</artifactId>", "<version>" + testV.Java[versions.JavaJacoco] + "</version>",
+			"<goal>prepare-agent</goal>", "<goal>report</goal>", "<phase>verify</phase>"},
+		".github/workflows/ci.yml": {"fetch-depth: 0", "./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar",
+			"SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}", "if: env.HAS_SONAR_TOKEN == 'true'"},
+		".gitlab-ci.yml": {"- analyze\n", "./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar", "- if: $SONAR_TOKEN\n"},
+		"README.md":      {"## SonarQube", "`SONAR_TOKEN`", "./mvnw verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar"},
+	}
+	for name, c := range map[string]struct {
+		files  map[string][]byte
+		checks map[string][]string
+	}{"go": {goFiles, checks}, "java": {javaFiles, javaChecks}} {
+		for f, wants := range c.checks {
+			for _, w := range wants {
+				if !strings.Contains(string(c.files[f]), w) {
+					t.Errorf("%s %s does not contain %q", name, f, w)
+				}
+			}
+		}
+		// The token is only ever referenced, never written: no sonar.token or sonar.login setting.
+		for f, b := range c.files {
+			for _, bad := range []string{"<no value>", "sonar.token", "sonar.login", "sonar.password"} {
+				if strings.Contains(string(b), bad) {
+					t.Errorf("%s %s contains %q", name, f, bad)
+				}
+			}
+		}
+	}
+	if _, ok := javaFiles["sonar-project.properties"]; ok {
+		t.Error("java: sonar-project.properties generated; the Maven scanner reads pom.xml")
+	}
+
+	// Without the extra nothing about Sonar or JaCoCo is generated.
+	plainGo, _ := Render(opts("gin", "clean", "postgresql", "github-actions", "gitlab-ci"), testV)
+	plainJava, _ := Render(javaOpts("clean", "postgresql", "github-actions", "gitlab-ci"), testV)
+	for name, files := range map[string]map[string][]byte{"go": plainGo, "java": plainJava} {
+		for f, b := range files {
+			if f == "project.yaml" {
+				continue
+			}
+			for _, bad := range []string{"sonar", "Sonar", "jacoco"} {
+				if strings.Contains(string(b), bad) {
+					t.Errorf("%s %s mentions %q without the sonarqube extra", name, f, bad)
+				}
+			}
 		}
 	}
 }

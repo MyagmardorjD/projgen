@@ -8,8 +8,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+{{- if .Sonar}}
+    env:
+      # The SonarQube step is skipped until the SONAR_TOKEN secret is set (e.g. on forks).
+      HAS_SONAR_TOKEN: ${{"{{"}} secrets.SONAR_TOKEN != '' {{"}}"}}
+{{- end}}
     steps:
       - uses: actions/checkout@{{index .V.Actions "actions/checkout"}}
+{{- if .Sonar}}
+        with:
+          fetch-depth: 0 # full history for SonarQube blame and new-code detection
+{{- end}}
       - uses: actions/setup-java@{{index .V.Actions "actions/setup-java"}}
         with:
           distribution: temurin
@@ -17,3 +26,11 @@ jobs:
           cache: maven
       - name: Build and test
         run: ./mvnw -B verify
+{{- if .Sonar}}
+      - name: SonarQube scan
+        if: env.HAS_SONAR_TOKEN == 'true'
+        run: ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+        env:
+          SONAR_TOKEN: ${{"{{"}} secrets.SONAR_TOKEN {{"}}"}}
+          SONAR_HOST_URL: ${{"{{"}} vars.SONAR_HOST_URL || secrets.SONAR_HOST_URL {{"}}"}}
+{{- end}}
