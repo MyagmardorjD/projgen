@@ -53,7 +53,14 @@ var (
 		{"observability", "Prometheus /metrics and OpenTelemetry tracing"},
 		{"redis", "Redis cache (go-redis / Spring Data Redis)"},
 		{"sonarqube", "SonarQube analysis (sonar-project.properties / JaCoCo, CI scan)"},
+		{"tp-logger", "TechPartners logger-go behind the logger package (Go)"},
+		{"qpay", "QPay V2 payments client (qpay-go, Go)"},
+		{"bonum", "Bonum payment gateway client (bonum-go, Go)"},
+		{"golomt", "Golomt Bank eCommerce and SocialPay clients (golomt-api-go, Go)"},
 	}
+
+	// GoOnlyExtras wrap Go libraries and are not available for Java.
+	GoOnlyExtras = []string{"tp-logger", "qpay", "bonum", "golomt"}
 )
 
 // Options is the full set of choices for one generated project.
@@ -153,6 +160,13 @@ func (o Options) Validate() error {
 	}
 	if o.HasExtra("docker-compose") && !o.HasExtra("docker") {
 		errs = append(errs, errors.New("extra docker-compose requires docker (compose builds the Dockerfile)"))
+	}
+	if o.Language == "java" {
+		for _, e := range GoOnlyExtras {
+			if o.HasExtra(e) {
+				errs = append(errs, fmt.Errorf("extra %s: available for Go projects only", e))
+			}
+		}
 	}
 	if o.HasExtra("migrations") && o.Database == "none" {
 		errs = append(errs, errors.New("extra migrations requires a database"))

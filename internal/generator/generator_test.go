@@ -74,7 +74,8 @@ func opts(fw, arch, db string, extras ...string) options.Options {
 	}
 }
 
-var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger", "auth", "observability", "redis", "sonarqube"}
+var allExtras = []string{"docker", "docker-compose", "gitlab-ci", "github-actions", "swagger", "auth", "observability", "redis", "sonarqube",
+	"tp-logger", "qpay", "bonum", "golomt"}
 
 // extrasFor returns every extra valid for the database: migrations need one.
 func extrasFor(db string) []string {
@@ -228,6 +229,94 @@ func TestRender_AuthObservabilityRedis(t *testing.T) {
 		if _, ok := java[f]; !ok {
 			t.Errorf("missing %s", f)
 		}
+	}
+}
+
+// The TechPartners library extras add their module, package and settings
+// only when chosen, and each payment client can be chosen on its own.
+func TestRender_TechPartnersLibraries(t *testing.T) {
+	plain, err := Render(opts("fiber", "hexagonal", "none"), testV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{versions.TPLogger, versions.QPay, versions.Bonum, versions.Golomt} {
+		if strings.Contains(string(plain["go.mod"]), m) {
+			t.Errorf("go.mod requires %s without its extra", m)
+		}
+	}
+	for p := range plain {
+		if strings.Contains(p, "/payment/") {
+			t.Errorf("%s generated without a payment extra", p)
+		}
+	}
+	if strings.Contains(string(plain["pkg/logger/logger.go"]), "logger-go") {
+		t.Error("logger uses logger-go without tp-logger")
+	}
+
+	dir := "internal/adapters/payment/"
+	cases := []struct {
+		extra, module string
+		files         []string
+		checks        map[string][]string
+	}{
+		{"tp-logger", versions.TPLogger, nil, map[string][]string{
+			"pkg/logger/logger.go":      {`tplog "github.com/techpartners-asia/logger-go"`, `Time: "@timestamp", Level: "level", Message: "message"`, "tplog.WithRedaction()"},
+			"pkg/logger/logger_test.go": {"TestSecretsRedacted"},
+		}},
+		{"qpay", versions.QPay, []string{dir + "doc.go", dir + "qpay.go", dir + "qpay_test.go"}, map[string][]string{
+			"cmd/server/main.go":        {"payment.NewQPay(cfg.QPay)"},
+			"internal/config/config.go": {`getenv("QPAY_ENDPOINT", "https://merchant-sandbox.qpay.mn/v2")`, "QPAY_INVOICE_CODE"},
+			".env.example":              {"QPAY_USERNAME=\n", "QPAY_PASSWORD=\n"},
+			"docker-compose.yml":        {"QPAY_PASSWORD: ${QPAY_PASSWORD:?"},
+			"README.md":                 {"## Payments", "QPAY_USERNAME"},
+		}},
+		{"bonum", versions.Bonum, []string{dir + "doc.go", dir + "bonum.go", dir + "bonum_test.go"}, map[string][]string{
+			"cmd/server/main.go":        {"payment.NewBonum(cfg.Bonum)", "defer bonumClient.Close()"},
+			"internal/config/config.go": {`getenv("BONUM_ENV", "sandbox")`},
+			".env.example":              {"BONUM_APP_SECRET=\n", "BONUM_CHECKSUM_KEY=\n"},
+			"docker-compose.yml":        {"BONUM_APP_SECRET: ${BONUM_APP_SECRET:?"},
+		}},
+		{"golomt", versions.Golomt, []string{dir + "doc.go", dir + "golomt.go", dir + "golomt_test.go"}, map[string][]string{
+			"cmd/server/main.go":        {"payment.NewGolomt(cfg.Golomt)"},
+			"internal/config/config.go": {"func (g Golomt) Ecommerce() bool", "func (g Golomt) SocialPay() bool"},
+			".env.example":              {"GOLOMT_ECOMMERCE_SECRET=\n", "GOLOMT_SOCIALPAY_SECRET=\n"},
+			"docker-compose.yml":        {"GOLOMT_ECOMMERCE_TOKEN: ${GOLOMT_ECOMMERCE_TOKEN:-}"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.extra, func(t *testing.T) {
+			files, err := Render(opts("fiber", "hexagonal", "none", "docker", "docker-compose", tc.extra), testV)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(files["go.mod"]), tc.module+" "+testV.Modules[tc.module]) {
+				t.Errorf("go.mod does not require %s %s", tc.module, testV.Modules[tc.module])
+			}
+			for _, f := range tc.files {
+				if _, ok := files[f]; !ok {
+					t.Errorf("missing %s", f)
+				}
+			}
+			for f, wants := range tc.checks {
+				for _, w := range wants {
+					if !strings.Contains(string(files[f]), w) {
+						t.Errorf("%s does not contain %q", f, w)
+					}
+				}
+			}
+			// Credentials are only ever referenced, never given a value.
+			for _, f := range []string{".env.example", "docker-compose.yml"} {
+				for _, bad := range []string{"test-password", "test-secret", "test-token"} {
+					if strings.Contains(string(files[f]), bad) {
+						t.Errorf("%s contains the test value %q", f, bad)
+					}
+				}
+			}
+		})
+	}
+
+	if _, err := Render(javaOpts("clean", "postgresql", "qpay"), testV); err == nil || !strings.Contains(err.Error(), "Go projects only") {
+		t.Errorf("java with qpay: err = %v, want a Go-only error", err)
 	}
 }
 

@@ -1,0 +1,110 @@
+package {{.P.payment.Name}}
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	qpay "github.com/techpartners-asia/qpay-go/qpay_v2"
+
+	"{{.P.config.Import}}"
+)
+
+// fakeQPay answers the QPay auth endpoints. Credentials are test values only.
+func fakeQPay(t *testing.T, logins, refreshes *atomic.Int32) *httptest.Server {
+	t.Helper()
+	token := func(w http.ResponseWriter, access string) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token_type":         "bearer",
+			"access_token":       access,
+			"expires_in":         time.Now().Add(time.Hour).Unix(),
+			"refresh_token":      "refresh-" + access,
+			"refresh_expires_in": time.Now().Add(24 * time.Hour).Unix(),
+		})
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/token", func(w http.ResponseWriter, r *http.Request) {
+		if user, pass, _ := r.BasicAuth(); user != "test-user" || pass != "test-password" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		logins.Add(1)
+		token(w, "login")
+	})
+	mux.HandleFunc("POST /auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+		refreshes.Add(1)
+		token(w, "refreshed")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func testQPay(url, password string) *QPay {
+	return NewQPay(config.QPay{Username: "test-user", Password: password, Endpoint: url,
+		CallbackURL: "http://localhost:8080/payments/qpay", InvoiceCode: "TEST_INVOICE"})
+}
+
+func TestQPayAuthorize_LogsInOnce(t *testing.T) {
+	var logins, refreshes atomic.Int32
+	q := testQPay(fakeQPay(t, &logins, &refreshes).URL, "test-password")
+	ctx := context.Background()
+
+	for range 3 {
+		if err := q.Authorize(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if logins.Load() != 1 || q.Token().AccessToken != "login" {
+		t.Errorf("logins = %d, token = %q; want one login", logins.Load(), q.Token().AccessToken)
+	}
+}
+
+func TestQPayAuthorize_RefreshesExpiredToken(t *testing.T) {
+	var logins, refreshes atomic.Int32
+	q := testQPay(fakeQPay(t, &logins, &refreshes).URL, "test-password")
+	q.SetToken(qpay.Token{AccessToken: "old", ExpiresAt: time.Now().Add(-time.Minute),
+		RefreshToken: "refresh-old", RefreshExpiresAt: time.Now().Add(time.Hour)})
+
+	if err := q.Authorize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes.Load() != 1 || logins.Load() != 0 || q.Token().AccessToken != "refreshed" {
+		t.Errorf("refreshes = %d, logins = %d, token = %q", refreshes.Load(), logins.Load(), q.Token().AccessToken)
+	}
+}
+
+func TestQPayAuthorize_BadCredentials(t *testing.T) {
+	var logins, refreshes atomic.Int32
+	q := testQPay(fakeQPay(t, &logins, &refreshes).URL, "wrong-password")
+
+	err := q.Authorize(context.Background())
+	if !errors.Is(err, qpay.ErrUnauthorized) {
+		t.Fatalf("err = %v, want qpay.ErrUnauthorized", err)
+	}
+	if !q.Token().IsZero() {
+		t.Error("token installed after a failed login")
+	}
+}
+
+func TestQPayReset(t *testing.T) {
+	var logins, refreshes atomic.Int32
+	q := testQPay(fakeQPay(t, &logins, &refreshes).URL, "test-password")
+	ctx := context.Background()
+	if err := q.Authorize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	q.Reset()
+	if err := q.Authorize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if logins.Load() != 2 {
+		t.Errorf("logins = %d, want 2 after Reset", logins.Load())
+	}
+}

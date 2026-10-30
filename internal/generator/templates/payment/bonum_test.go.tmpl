@@ -1,0 +1,26 @@
+package {{.P.payment.Name}}
+
+import (
+	"testing"
+
+	"{{.P.config.Import}}"
+)
+
+func TestNewBonum(t *testing.T) {
+	for _, env := range []string{"sandbox", "production"} {
+		c, err := NewBonum(config.Bonum{Env: env, AppSecret: "test-secret", TerminalID: "test-terminal"})
+		if err != nil {
+			t.Fatalf("%s: %v", env, err)
+		}
+		if c.Invoices == nil {
+			t.Errorf("%s: Invoices service missing", env)
+		}
+		c.Close()
+	}
+}
+
+func TestNewBonum_UnknownEnv(t *testing.T) {
+	if _, err := NewBonum(config.Bonum{Env: "live", AppSecret: "test-secret", TerminalID: "test-terminal"}); err == nil {
+		t.Fatal("want an error for an unknown environment")
+	}
+}

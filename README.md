@@ -86,7 +86,7 @@ language: go
 framework: gin            # gin | echo | fiber | nethttp
 architecture: clean       # layered | clean | hexagonal
 database: postgresql      # postgresql | mysql | none
-extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions, auth, observability, redis, sonarqube
+extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-actions, auth, observability, redis, sonarqube, tp-logger, qpay, bonum, golomt
 ```
 
 `migrations` (DB сонгосон үед): асахдаа migration-ийг автоматаар ажиллуулна. Go: `migrations/*.sql`-ийг binary-д суулгаж golang-migrate-ээр, Java: `db/migration/V*.sql`-ийг Flyway-ээр. `MIGRATE_ON_START=false` гэж унтраана. `projgen add entity`-ийн migration ч дараагийн асалтад автоматаар ажиллана.
@@ -99,6 +99,19 @@ extras: [docker, docker-compose, gitlab-ci, swagger, migrations]   # + github-ac
 | `sonarqube` | `sonar-project.properties` (project key = төслийн нэр, `sonar.sources`/`sonar.tests`, `*_test.go`-г эх кодоос хасна, `sonar.go.coverage.reportPaths=coverage.out`); CI `go test -coverprofile=coverage.out` ажиллуулна | `pom.xml`-д JaCoCo plugin (`./mvnw verify` → `target/site/jacoco/jacoco.xml`) болон `sonar.projectKey`, `sonar.coverage.jacoco.xmlReportPaths` |
 
 `/health` болон `/metrics` нийтэд нээлттэй хэвээр. Нууц утгуудад анхдагч утга байхгүй (docker-compose ч `JWT_SECRET`-ийг `.env`-ээс шаардана). docker-compose сонгосон бол `redis` service нэмэгдэнэ.
+
+### TechPartners сангууд (зөвхөн Go)
+
+[techpartners-asia](https://github.com/techpartners-asia)-ийн Go сангуудыг нэмэлтээр сонгоно. Хувилбарыг бусад модулийн адил proxy.golang.org-оос шалгана (`projgen update`). Java төсөлд сонговол алдаа заана.
+
+| Нэмэлт | Модуль | Үүсэх зүйл |
+| --- | --- | --- |
+| `tp-logger` | `github.com/techpartners-asia/logger-go` | `logger` пакет logger-go дээр ажиллана: API нь хэвээр (`*slog.Logger`, `FromContext`, `request_id`), JSON талбарууд `@timestamp`, `level`, `message`, `service`, `env`, `logger`. `password`, `token`, `authorization`, `card_number` зэрэг нууц талбарыг `[REDACTED]` болгоно. `techpartners-go` preset-д орсон |
+| `qpay` | `github.com/techpartners-asia/qpay-go` (`qpay_v2`) | `payment.NewQPay(cfg.QPay)`; `Authorize(ctx)` token-ийг login/refresh хийж шинэчилнэ. `QPAY_USERNAME`, `QPAY_PASSWORD`, `QPAY_CALLBACK_URL`, `QPAY_INVOICE_CODE` заавал, `QPAY_ENDPOINT` анхдагчаар sandbox, `QPAY_MERCHANT_ID` сонголттой |
+| `bonum` | `github.com/techpartners-asia/bonum-go` | `payment.NewBonum(cfg.Bonum)` → `*bonum.Client` (token-оо өөрөө удирдана). `BONUM_ENV` (`sandbox`/`production`), `BONUM_APP_SECRET`, `BONUM_TERMINAL_ID` заавал, webhook шалгах `BONUM_CHECKSUM_KEY` сонголттой |
+| `golomt` | `github.com/techpartners-asia/golomt-api-go` (`ecommerce`, `socialpay`) | `payment.NewGolomt(cfg.Golomt)` → eCommerce, SocialPay client. Аль нэгийнх нь бүх утгыг өгөх ёстой: `GOLOMT_ECOMMERCE_SECRET`+`GOLOMT_ECOMMERCE_TOKEN` (`GOLOMT_ECOMMERCE_URL` анхдагчтай) эсвэл `GOLOMT_SOCIALPAY_URL`+`GOLOMT_SOCIALPAY_TERMINAL`+`GOLOMT_SOCIALPAY_SECRET`; тохируулаагүй нь `nil` |
+
+Төлбөрийн client-ууд `payment` пакетэд (layered/clean: `internal/payment`, hexagonal: `internal/adapters/payment`) үүсч, `cmd/server` асахдаа тохиргооноос үүсгэнэ. Заавал хэрэгтэй хувьсагч дутуу бол асахгүй. Нууц утгууд `.env.example`-д хоосон, docker-compose-д `.env`-ээс шаардагдана; кодонд, логт бичигдэхгүй. Үүссэн тестүүд сүлжээ шаардахгүй (QPay-г `httptest`-ээр дуурайна).
 
 `sonarqube`-ийг `github-actions` эсвэл `gitlab-ci`-тэй хамт сонговол CI-д SonarQube scan алхам нэмэгдэнэ (GitHub: `SonarSource/sonarqube-scan-action` / `sonar-maven-plugin`, GitLab: `analyze` stage дахь `sonarqube` job). Серверийн хаяг, token-ийг зөвхөн CI-ийн нууц утгаас уншина, үүссэн файлд token хэзээ ч бичигдэхгүй:
 
@@ -139,7 +152,7 @@ Preset гурван газраас ачаалагдана. Ижил нэртэй
 
 | Эх үүсвэр | Хаана | Жишээ |
 | --- | --- | --- |
-| Суулгасан | projgen-д | `techpartners-go`, `techpartners-java` (хоёулаа migration-тэй), `go-minimal` |
+| Суулгасан | projgen-д | `techpartners-go` (logger-go-тэй), `techpartners-java` (хоёулаа migration-тэй), `go-minimal` |
 | Баг | `PROJGEN_PRESETS` хувьсагчид заасан хавтсууд (`;`-ээр, Linux/macOS дээр `:`-ээр тусгаарлана) | clone хийсэн багийн repo, хуваалцсан диск |
 | Хэрэглэгч | `<тохиргооны хавтас>/projgen/presets` (доорхыг үз) | `projgen preset save`-ээр хадгалсан |
 

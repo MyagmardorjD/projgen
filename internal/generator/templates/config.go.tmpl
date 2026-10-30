@@ -2,6 +2,9 @@
 package config
 
 import (
+{{- if .Payment}}
+	"errors"
+{{- end}}
 	"fmt"
 	"os"
 	"strconv"
@@ -29,7 +32,62 @@ type Config struct {
 {{- if .Redis}}
 	RedisURL string // redis://user:password@host:6379/0
 {{- end}}
+{{- if .QPay}}
+	QPay QPay
+{{- end}}
+{{- if .Bonum}}
+	Bonum Bonum
+{{- end}}
+{{- if .Golomt}}
+	Golomt Golomt
+{{- end}}
 }
+{{- if .QPay}}
+
+// QPay holds the QPay V2 merchant settings. Never log Password.
+type QPay struct {
+	Username    string // QPAY_USERNAME (client_id)
+	Password    string // QPAY_PASSWORD (client_secret)
+	Endpoint    string // QPAY_ENDPOINT, sandbox by default
+	CallbackURL string // QPAY_CALLBACK_URL, where QPay reports payments
+	InvoiceCode string // QPAY_INVOICE_CODE
+	MerchantID  string // QPAY_MERCHANT_ID, optional
+}
+{{- end}}
+{{- if .Bonum}}
+
+// Bonum holds the Bonum payment gateway settings. Never log the secrets.
+type Bonum struct {
+	Env         string // BONUM_ENV: sandbox or production
+	AppSecret   string // BONUM_APP_SECRET
+	TerminalID  string // BONUM_TERMINAL_ID
+	ChecksumKey string // BONUM_CHECKSUM_KEY verifies webhooks; optional
+}
+{{- end}}
+{{- if .Golomt}}
+
+// Golomt holds the Golomt Bank settings. Each service is used only when all
+// of its variables are set, and at least one must be. Never log the secrets.
+type Golomt struct {
+	EcommerceURL    string // GOLOMT_ECOMMERCE_URL
+	EcommerceSecret string // GOLOMT_ECOMMERCE_SECRET (HMAC key)
+	EcommerceToken  string // GOLOMT_ECOMMERCE_TOKEN (bearer token)
+
+	SocialPayURL      string // GOLOMT_SOCIALPAY_URL
+	SocialPayTerminal string // GOLOMT_SOCIALPAY_TERMINAL
+	SocialPaySecret   string // GOLOMT_SOCIALPAY_SECRET
+}
+
+// Ecommerce reports whether the eCommerce service is configured.
+func (g Golomt) Ecommerce() bool {
+	return g.EcommerceURL != "" && g.EcommerceSecret != "" && g.EcommerceToken != ""
+}
+
+// SocialPay reports whether the SocialPay service is configured.
+func (g Golomt) SocialPay() bool {
+	return g.SocialPayURL != "" && g.SocialPayTerminal != "" && g.SocialPaySecret != ""
+}
+{{- end}}
 
 // Load reads the configuration. Secrets come only from the environment.
 func Load() (Config, error) {
@@ -48,6 +106,34 @@ func Load() (Config, error) {
 {{- end}}
 {{- if .Redis}}
 		RedisURL: os.Getenv("REDIS_URL"),
+{{- end}}
+{{- if .QPay}}
+		QPay: QPay{
+			Username:    os.Getenv("QPAY_USERNAME"),
+			Password:    os.Getenv("QPAY_PASSWORD"),
+			Endpoint:    getenv("QPAY_ENDPOINT", "https://merchant-sandbox.qpay.mn/v2"),
+			CallbackURL: os.Getenv("QPAY_CALLBACK_URL"),
+			InvoiceCode: os.Getenv("QPAY_INVOICE_CODE"),
+			MerchantID:  os.Getenv("QPAY_MERCHANT_ID"),
+		},
+{{- end}}
+{{- if .Bonum}}
+		Bonum: Bonum{
+			Env:         getenv("BONUM_ENV", "sandbox"),
+			AppSecret:   os.Getenv("BONUM_APP_SECRET"),
+			TerminalID:  os.Getenv("BONUM_TERMINAL_ID"),
+			ChecksumKey: os.Getenv("BONUM_CHECKSUM_KEY"),
+		},
+{{- end}}
+{{- if .Golomt}}
+		Golomt: Golomt{
+			EcommerceURL:      getenv("GOLOMT_ECOMMERCE_URL", "https://ecommerce.golomtbank.com"),
+			EcommerceSecret:   os.Getenv("GOLOMT_ECOMMERCE_SECRET"),
+			EcommerceToken:    os.Getenv("GOLOMT_ECOMMERCE_TOKEN"),
+			SocialPayURL:      os.Getenv("GOLOMT_SOCIALPAY_URL"),
+			SocialPayTerminal: os.Getenv("GOLOMT_SOCIALPAY_TERMINAL"),
+			SocialPaySecret:   os.Getenv("GOLOMT_SOCIALPAY_SECRET"),
+		},
 {{- end}}
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
@@ -73,6 +159,36 @@ func Load() (Config, error) {
 {{- if .Redis}}
 	if c.RedisURL == "" {
 		return Config{}, fmt.Errorf("config: REDIS_URL is required")
+	}
+{{- end}}
+{{- if .Payment}}
+	var missing []error
+{{- end}}
+{{- if .QPay}}
+	for _, kv := range [][2]string{ {"QPAY_USERNAME", c.QPay.Username}, {"QPAY_PASSWORD", c.QPay.Password},
+		{"QPAY_CALLBACK_URL", c.QPay.CallbackURL}, {"QPAY_INVOICE_CODE", c.QPay.InvoiceCode}} {
+		if kv[1] == "" {
+			missing = append(missing, fmt.Errorf("config: %s is required", kv[0]))
+		}
+	}
+{{- end}}
+{{- if .Bonum}}
+	if c.Bonum.Env != "sandbox" && c.Bonum.Env != "production" {
+		missing = append(missing, fmt.Errorf("config: BONUM_ENV %q is not sandbox or production", c.Bonum.Env))
+	}
+	if c.Bonum.AppSecret == "" || c.Bonum.TerminalID == "" {
+		missing = append(missing, errors.New("config: BONUM_APP_SECRET and BONUM_TERMINAL_ID are required"))
+	}
+{{- end}}
+{{- if .Golomt}}
+	if !c.Golomt.Ecommerce() && !c.Golomt.SocialPay() {
+		missing = append(missing, errors.New("config: set GOLOMT_ECOMMERCE_SECRET and GOLOMT_ECOMMERCE_TOKEN, "+
+			"or GOLOMT_SOCIALPAY_URL, GOLOMT_SOCIALPAY_TERMINAL and GOLOMT_SOCIALPAY_SECRET"))
+	}
+{{- end}}
+{{- if .Payment}}
+	if err := errors.Join(missing...); err != nil {
+		return Config{}, err
 	}
 {{- end}}
 	return c, nil

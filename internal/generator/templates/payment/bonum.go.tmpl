@@ -1,0 +1,25 @@
+package {{.P.payment.Name}}
+
+import (
+	"fmt"
+
+	bonum "github.com/techpartners-asia/bonum-go"
+
+	"{{.P.config.Import}}"
+)
+
+// NewBonum returns a Bonum client for c.Env (sandbox or production). Tokens
+// are fetched and refreshed by the client on first use; it does not call
+// Bonum here. Close it on shutdown.
+//
+// Verify webhooks against the raw request body with c.ChecksumKey:
+//
+//	ev, err := bonum.ParseWebhook(body, r.Header.Get(bonum.ChecksumHeader), cfg.Bonum.ChecksumKey)
+func NewBonum(c config.Bonum) (*bonum.Client, error) {
+	env := map[string]bonum.Environment{"sandbox": bonum.Sandbox, "production": bonum.Production}
+	e, ok := env[c.Env]
+	if !ok {
+		return nil, fmt.Errorf("bonum: environment %q is not sandbox or production", c.Env)
+	}
+	return bonum.New(e, c.AppSecret, c.TerminalID), nil
+}

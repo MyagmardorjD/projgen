@@ -1,0 +1,27 @@
+package {{.P.payment.Name}}
+
+import (
+	"github.com/techpartners-asia/golomt-api-go/ecommerce"
+	"github.com/techpartners-asia/golomt-api-go/socialpay"
+
+	"{{.P.config.Import}}"
+)
+
+// Golomt holds the Golomt Bank clients. A client is nil when its variables
+// are not set, so check it before use.
+type Golomt struct {
+	Ecommerce ecommerce.GolomtEcommerce // card invoices, tokenized payments, settlement
+	SocialPay socialpay.SocialPay       // QR and phone-number invoices
+}
+
+// NewGolomt returns the clients configured in c. It does not call Golomt.
+func NewGolomt(c config.Golomt) Golomt {
+	var g Golomt
+	if c.Ecommerce() {
+		g.Ecommerce = ecommerce.New(c.EcommerceURL, c.EcommerceSecret, c.EcommerceToken)
+	}
+	if c.SocialPay() {
+		g.SocialPay = socialpay.New(c.SocialPayTerminal, c.SocialPaySecret, c.SocialPayURL)
+	}
+	return g
+}
