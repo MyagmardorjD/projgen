@@ -59,6 +59,25 @@ type FieldData struct {
 	JavaSample string // Java literal used in tests
 	JavaGet    string // ResultSet getter: getDouble
 	JavaParam  string // JDBC parameter for the input value: in.unitPrice()
+
+	// Set for ref fields only.
+	Target       Names  // the entity referred to
+	RefGo        string // Customer: names the lookup the service checks ids with
+	RefVar       string // customer
+	FK           string // fk_orders_customer_id
+	Index        string // idx_orders_customer_id
+	SeedVar      string // repository test variable holding a stored Customer's id
+	MapsConflict bool   // the target's Go repository reports a blocked delete as ErrConflict
+}
+
+// Seed is a row the repository test inserts so that ref fields have
+// something to point at. Seeds are ordered so that parents come first.
+type Seed struct {
+	Table   string
+	Var     string   // customersID
+	GoSQL   string   // INSERT with $n or ? placeholders for Args
+	JavaSQL string   // the same with ? placeholders
+	Args    []string // Vars of earlier seeds, one per placeholder
 }
 
 // SQL holds pre-built SQL fragments for the repository template.
@@ -77,6 +96,8 @@ type Data struct {
 	SQL           SQL
 	MigrationsRel string // migrations folder relative to the repository package
 	HasTime       bool   // some field is a time
+	Refs          []FieldData
+	Seeds         []Seed
 }
 
 // Result lists what Add did.
@@ -119,6 +140,10 @@ func add(dir string, spec Spec, force bool, now time.Time, write bool) (Result, 
 		}
 	}
 	d := newData(o, spec)
+	refEdits, refManual, err := resolveRefs(dir, &d)
+	if err != nil {
+		return res, err
+	}
 	files := plan(d, migrationStamp(dir, d.Java, now))
 
 	for _, f := range files {
@@ -154,6 +179,7 @@ func add(dir string, spec Spec, force bool, now time.Time, write bool) (Result, 
 			return res, err
 		}
 	}
+	edits, manual = append(edits, refEdits...), append(manual, refManual...)
 
 	res.AutoMigrate = o.HasExtra("migrations")
 	res.Java = d.Java
@@ -210,16 +236,7 @@ func readProject(dir string) (options.Options, error) {
 
 func newData(o options.Options, s Spec) Data {
 	d := Data{Data: generator.NewData(o, versions.Defaults())}
-	sn := snake(s.Name)
-	table := plural(sn)
-	d.E = Names{
-		Name:   pascal(s.Name),
-		Var:    camel(s.Name),
-		Snake:  sn,
-		Table:  table,
-		Route:  strings.ReplaceAll(table, "_", "-"),
-		Plural: pascal(table),
-	}
+	d.E = names(s.Name)
 	pg := o.Database == "postgresql"
 	java := o.Language == "java"
 	ph := func(i int) string {
@@ -232,28 +249,38 @@ func newData(o options.Options, s Spec) Data {
 	sel = append(sel, "id")
 	scan = append(scan, "&x.ID")
 	for i, f := range s.Fields {
-		fd := FieldData{Field: f, Go: pascal(f.Name), JSON: f.Name, Column: f.Name}
+		col := f.Column()
+		fd := FieldData{Field: f, Go: pascal(col), JSON: col, Column: col}
 		fd.GoType, fd.SQLType, fd.Sample, fd.SampleJSON = typeInfo(f.Type, pg)
-		fd.Java = camel(f.Name)
+		fd.Java = camel(col)
 		fd.JavaType, fd.JavaBoxed, fd.JavaZero, fd.JavaSample, fd.JavaGet = javaTypeInfo(f.Type)
 		fd.JavaParam = "in." + fd.Java + "()"
 		if f.Type == "time" {
 			fd.JavaParam = "Timestamp.from(" + fd.JavaParam + ")"
 			d.HasTime = true
 		}
+		if f.Type == "ref" {
+			fd.Target = names(f.Ref)
+			fd.RefGo, fd.RefVar = pascal(f.Name), camel(f.Name)
+			fd.FK = "fk_" + d.E.Table + "_" + col
+			fd.Index = "idx_" + d.E.Table + "_" + col
+			fd.SeedVar = seedVar(fd.Target.Table)
+		}
 		d.Fields = append(d.Fields, fd)
-		sel = append(sel, f.Name)
-		ins = append(ins, f.Name)
+		sel = append(sel, col)
+		ins = append(ins, col)
 		vals = append(vals, ph(i+1))
-		set = append(set, f.Name+" = "+ph(i+1))
+		set = append(set, col+" = "+ph(i+1))
 		scan = append(scan, "&x."+fd.Go)
 		args = append(args, "in."+fd.Go)
-		sample = append(sample, fmt.Sprintf("%q:%s", f.Name, fd.SampleJSON))
+		sample = append(sample, fmt.Sprintf("%q:%s", col, fd.SampleJSON))
 	}
 	for i := range d.Fields {
-		if d.Fields[i].Required {
+		if d.Fields[i].Required && d.FirstRequired == nil {
 			d.FirstRequired = &d.Fields[i]
-			break
+		}
+		if d.Fields[i].Type == "ref" {
+			d.Refs = append(d.Refs, d.Fields[i])
 		}
 	}
 	sel = append(sel, "created_at", "updated_at")
@@ -272,6 +299,20 @@ func newData(o options.Options, s Spec) Data {
 		P2:          ph(2),
 	}
 	return d
+}
+
+// names spells an entity name every way the templates need.
+func names(name string) Names {
+	sn := snake(name)
+	table := plural(sn)
+	return Names{
+		Name:   pascal(name),
+		Var:    camel(name),
+		Snake:  sn,
+		Table:  table,
+		Route:  strings.ReplaceAll(table, "_", "-"),
+		Plural: pascal(table),
+	}
 }
 
 // typeInfo returns Go type, SQL type, Go sample and JSON sample for a field type.
@@ -297,6 +338,9 @@ func typeInfo(t string, pg bool) (goType, sqlType, sample, sampleJSON string) {
 		return "bool", "BOOLEAN", "true", "true"
 	case "time":
 		return "time.Time", pick("TIMESTAMPTZ", "DATETIME(6)"), "time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)", `"2026-01-02T15:04:05Z"`
+	case "ref":
+		// Tests stub the referred entity so that ids 1 and 2 exist.
+		return "int64", "BIGINT", "1", "1"
 	}
 	panic("entity: unknown type " + t)
 }
@@ -320,6 +364,8 @@ func javaTypeInfo(t string) (typ, boxed, zero, sample, get string) {
 	case "time":
 		// There is no sensible zero time, so a time must always be sent.
 		return "Instant", "Instant", "", `Instant.parse("2026-01-02T15:04:05Z")`, "getTimestamp"
+	case "ref":
+		return "long", "Long", "0L", "1L", "getLong"
 	}
 	panic("entity: unknown type " + t)
 }
@@ -347,7 +393,7 @@ func checkJava(s Spec) error {
 		errs = append(errs, fmt.Errorf("entity name %q clashes with a Java class the generated code uses; choose another", s.Name))
 	}
 	for _, f := range s.Fields {
-		if slices.Contains(javaKeywords, camel(f.Name)) {
+		if slices.Contains(javaKeywords, camel(f.Column())) {
 			errs = append(errs, fmt.Errorf("field %q is reserved in Java; choose another", f.Name))
 		}
 	}
@@ -370,6 +416,7 @@ func plan(d Data, stamp string) []outFile {
 	}
 	if d.HasDB {
 		fs = append(fs,
+			outFile{p["db"].Dir + "/sql_errors.go", "sql_errors.go.tmpl", true},
 			outFile{p["db"].Dir + "/" + d.E.Snake + "_repository.go", "repo_sql.go.tmpl", false},
 			outFile{p["db"].Dir + "/" + d.E.Snake + "_repository_test.go", "repo_sql_test.go.tmpl", false},
 			outFile{"migrations/" + stamp + "_create_" + d.E.Table + ".up.sql", "migration.up.sql.tmpl", false},
@@ -394,6 +441,9 @@ func javaPlan(d Data, stamp string) []outFile {
 		{p["http"].Dir + "/EntityExceptionHandler.java", "java/EntityExceptionHandler.java.tmpl", true},
 		{p["http"].Dir + "/" + n + "Controller.java", "java/Controller.java.tmpl", false},
 		{p["http"].TestDir + "/" + n + "ControllerTest.java", "java/ControllerTest.java.tmpl", false},
+	}
+	if len(d.Refs) > 0 {
+		fs = append(fs, outFile{p["domain"].Dir + "/" + n + "Filter.java", "java/Filter.java.tmpl", false})
 	}
 	if d.HasDB {
 		fs = append(fs,
@@ -451,7 +501,13 @@ func wiring(dir string, d Data) ([]edit, []string, error) {
 	if !d.HasDB {
 		repoArg = ""
 	}
-	wireLine := fmt.Sprintf("deps.%s = %s.New%sService(%s.New%sRepository(%s))", d.E.Plural, svc, d.E.Name, repo, d.E.Name, repoArg)
+	// A ref is checked through the referred entity's service, which main.go
+	// has wired already because that entity was added first.
+	var lookups string
+	for _, r := range d.Refs {
+		lookups += ", deps." + r.Target.Plural
+	}
+	wireLine := fmt.Sprintf("deps.%s = %s.New%sService(%s.New%sRepository(%s)%s)", d.E.Plural, svc, d.E.Name, repo, d.E.Name, repoArg, lookups)
 
 	var edits []edit
 	var manual []string
@@ -492,6 +548,12 @@ func wiring(dir string, d Data) ([]edit, []string, error) {
 		edits = append(edits, edit{mainPath, out})
 	} else {
 		manual = append(manual, fmt.Sprintf("%s: before the server starts (import %s %q):\n    %s", mainPath, repo, d.P["db"].Import, wireLine))
+	}
+	for _, r := range d.Refs {
+		if !bytes.Contains(mainSrc, []byte("deps."+r.Target.Plural+" = ")) {
+			manual = append(manual, fmt.Sprintf("%s: set deps.%s before deps.%s; %s checks %s through it",
+				mainPath, r.Target.Plural, d.E.Plural, d.E.Name, r.JSON))
+		}
 	}
 	return edits, manual, nil
 }

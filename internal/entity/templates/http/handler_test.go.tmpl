@@ -22,7 +22,7 @@ import (
 // update and delete, checking status codes and error cases on the way.
 func Test{{.E.Name}}Routes(t *testing.T) {
 	d := testDeps(nil)
-	d.{{.E.Plural}} = {{$s}}.New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+	d.{{.E.Plural}} = {{$s}}.New{{.E.Name}}Service(newFake{{.E.Name}}Repo(){{template "lookups" .}})
 	const base = "/api/v1/{{.E.Route}}"
 	valid := `{ {{- .SampleJSON -}} }`
 
@@ -43,6 +43,12 @@ func Test{{.E.Name}}Routes(t *testing.T) {
 		{"get missing", http.MethodGet, base + "/999", "", http.StatusNotFound, "not found"},
 		{"get bad id", http.MethodGet, base + "/abc", "", http.StatusBadRequest, "invalid id"},
 		{"list", http.MethodGet, base + "?limit=10&offset=0", "", http.StatusOK, `"id":1`},
+{{- range .Refs}}
+		{"create with unknown {{.JSON}}", http.MethodPost, base, `{ {{- $.SampleJSON -}} ,"{{.JSON}}":999}`, http.StatusUnprocessableEntity, "{{.Target.Snake}} 999 does not exist"},
+		{"list by {{.JSON}}", http.MethodGet, base + "?{{.JSON}}=1", "", http.StatusOK, `"id":1`},
+		{"list by other {{.JSON}}", http.MethodGet, base + "?{{.JSON}}=2", "", http.StatusOK, "[]"},
+		{"list by bad {{.JSON}}", http.MethodGet, base + "?{{.JSON}}=abc", "", http.StatusBadRequest, "invalid {{.JSON}}"},
+{{- end}}
 		{"update", http.MethodPut, base + "/1", valid, http.StatusOK, `"id":1`},
 		{"update missing", http.MethodPut, base + "/999", valid, http.StatusNotFound, "not found"},
 		{"delete", http.MethodDelete, base + "/1", "", http.StatusNoContent, ""},
@@ -65,7 +71,7 @@ func Test{{.E.Name}}Routes(t *testing.T) {
 // The response must be the {{.E.Name}} JSON shape clients rely on.
 func Test{{.E.Name}}JSONShape(t *testing.T) {
 	d := testDeps(nil)
-	d.{{.E.Plural}} = {{$s}}.New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+	d.{{.E.Plural}} = {{$s}}.New{{.E.Name}}Service(newFake{{.E.Name}}Repo(){{template "lookups" .}})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/{{.E.Route}}", strings.NewReader(`{ {{- .SampleJSON -}} }`))
 	req.Header.Set("Content-Type", "application/json")
 	_, body, _ := do(t, d, req)

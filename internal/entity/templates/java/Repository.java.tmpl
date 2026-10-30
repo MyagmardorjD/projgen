@@ -9,7 +9,7 @@ public interface {{.E.Name}}Repository {
 
     {{.E.Name}} get(long id);
 
-    List<{{.E.Name}}> list(int limit, int offset);
+    List<{{.E.Name}}> list({{if .Refs}}{{.E.Name}}Filter filter, {{end}}int limit, int offset);
 
     {{.E.Name}} update(long id, {{.E.Name}}Input in);
 

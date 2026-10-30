@@ -1,0 +1,5 @@
+package {{.P.domain.Name}};
+
+/** Narrows a list of {{.E.Table}}. A field that is 0 matches every record. */
+public record {{.E.Name}}Filter({{range $i, $f := .Refs}}{{if $i}}, {{end}}long {{$f.Java}}{{end}}) {
+}

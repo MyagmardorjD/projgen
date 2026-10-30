@@ -3,6 +3,9 @@ package {{.P.service.Name}}
 
 import (
 	"context"
+{{- if .Refs}}
+	"errors"
+{{- end}}
 	"fmt"
 
 	"{{.P.domain.Import}}"
@@ -16,17 +19,39 @@ const (
 // {{.E.Name}}Service holds the business rules for {{.E.Table}}.
 type {{.E.Name}}Service struct {
 	repo {{$d}}.{{.E.Name}}Repository
+{{- range .Refs}}
+	{{.RefVar}}Lookup interface {
+		Get(ctx context.Context, id int64) ({{$d}}.{{.Target.Name}}, error)
+	}
+{{- end}}
 }
+{{- if .Refs}}
+
+// New{{.E.Name}}Service checks that referred records exist through the
+// lookups; the services of the referred entities satisfy them.
+func New{{.E.Name}}Service(repo {{$d}}.{{.E.Name}}Repository
+{{- range .Refs}}, {{.RefVar}}Lookup interface {
+	Get(ctx context.Context, id int64) ({{$d}}.{{.Target.Name}}, error)
+}{{end}}) *{{.E.Name}}Service {
+	return &{{.E.Name}}Service{repo: repo{{range .Refs}}, {{.RefVar}}Lookup: {{.RefVar}}Lookup{{end}}}
+}
+{{- else}}
 
 func New{{.E.Name}}Service(repo {{$d}}.{{.E.Name}}Repository) *{{.E.Name}}Service {
 	return &{{.E.Name}}Service{repo: repo}
 }
+{{- end}}
 
 // Create validates in and stores a new record.
 func (s *{{.E.Name}}Service) Create(ctx context.Context, in {{$d}}.{{.E.Name}}Input) ({{$d}}.{{.E.Name}}, error) {
 	if err := in.Validate(); err != nil {
 		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("%w: %w", {{$d}}.ErrValidation, err)
 	}
+{{- if .Refs}}
+	if err := s.checkRefs(ctx, in); err != nil {
+		return {{$d}}.{{.E.Name}}{}, err
+	}
+{{- end}}
 	return s.repo.Create(ctx, in)
 }
 
@@ -39,7 +64,7 @@ func (s *{{.E.Name}}Service) Get(ctx context.Context, id int64) ({{$d}}.{{.E.Nam
 }
 
 // List returns one page ordered by id. limit defaults to 20 and is capped at 100.
-func (s *{{.E.Name}}Service) List(ctx context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+func (s *{{.E.Name}}Service) List(ctx context.Context, {{if .Refs}}f {{$d}}.{{.E.Name}}Filter, {{end}}limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
 	if limit <= 0 {
 		limit = default{{.E.Name}}PageSize
 	}
@@ -49,7 +74,7 @@ func (s *{{.E.Name}}Service) List(ctx context.Context, limit, offset int) ([]{{$
 	if offset < 0 {
 		offset = 0
 	}
-	return s.repo.List(ctx, limit, offset)
+	return s.repo.List(ctx, {{if .Refs}}f, {{end}}limit, offset)
 }
 
 // Update validates in and replaces the record's fields.
@@ -60,6 +85,11 @@ func (s *{{.E.Name}}Service) Update(ctx context.Context, id int64, in {{$d}}.{{.
 	if id <= 0 {
 		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
 	}
+{{- if .Refs}}
+	if err := s.checkRefs(ctx, in); err != nil {
+		return {{$d}}.{{.E.Name}}{}, err
+	}
+{{- end}}
 	return s.repo.Update(ctx, id, in)
 }
 
@@ -70,3 +100,21 @@ func (s *{{.E.Name}}Service) Delete(ctx context.Context, id int64) error {
 	}
 	return s.repo.Delete(ctx, id)
 }
+{{- if .Refs}}
+
+// checkRefs reports every referred record that does not exist as a validation error.
+func (s *{{.E.Name}}Service) checkRefs(ctx context.Context, in {{$d}}.{{.E.Name}}Input) error {
+	var errs []error
+{{- range .Refs}}
+	if _, err := s.{{.RefVar}}Lookup.Get(ctx, in.{{.Go}}); errors.Is(err, {{$d}}.ErrNotFound) {
+		errs = append(errs, fmt.Errorf("{{.JSON}}: {{.Target.Snake}} %d does not exist", in.{{.Go}}))
+	} else if err != nil {
+		return err
+	}
+{{- end}}
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %w", {{$d}}.ErrValidation, errors.Join(errs...))
+	}
+	return nil
+}
+{{- end}}

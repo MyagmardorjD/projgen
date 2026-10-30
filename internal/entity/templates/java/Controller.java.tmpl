@@ -1,6 +1,9 @@
 package {{.P.http.Name}};
 
 import {{.P.domain.Name}}.{{.E.Name}};
+{{- if .Refs}}
+import {{.P.domain.Name}}.{{.E.Name}}Filter;
+{{- end}}
 import {{.P.domain.Name}}.{{.E.Name}}Input;
 import {{.P.service.Name}}.{{.E.Name}}Service;
 import java.util.List;
@@ -32,11 +35,14 @@ public class {{.E.Name}}Controller {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.create(in));
     }
 
-    /** ?limit= and ?offset= are optional; bad values fall back to the defaults. */
+    /** ?limit= and ?offset= are optional; bad values fall back to the defaults.{{range .Refs}} ?{{.JSON}}= keeps one {{.Target.Snake}}'s records.{{end}} */
     @GetMapping
     public List<{{.E.Name}}> list(@RequestParam(name = "limit", required = false) String limit,
-            @RequestParam(name = "offset", required = false) String offset) {
-        return service.list(intOrZero(limit), intOrZero(offset));
+            @RequestParam(name = "offset", required = false) String offset
+{{- range .Refs}},
+            @RequestParam(name = "{{.JSON}}", defaultValue = "0") long {{.Java}}
+{{- end}}) {
+        return service.list({{if .Refs}}new {{.E.Name}}Filter({{range $i, $f := .Refs}}{{if $i}}, {{end}}{{$f.Java}}{{end}}), {{end}}intOrZero(limit), intOrZero(offset));
     }
 
     @GetMapping("/{id}")

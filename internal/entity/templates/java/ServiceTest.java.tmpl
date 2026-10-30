@@ -2,22 +2,40 @@ package {{.P.service.Name}};
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+{{- if .Refs}}
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+{{- end}}
 
 import {{.P.db.Name}}.InMemory{{.E.Name}}Repository;
 import {{.P.domain.Name}}.NotFoundException;
-{{- if or .FirstRequired .HasTime}}
+{{- if or .FirstRequired .HasTime .Refs}}
 import {{.P.domain.Name}}.ValidationException;
 {{- end}}
 import {{.P.domain.Name}}.{{.E.Name}};
+{{- if .Refs}}
+import {{.P.domain.Name}}.{{.E.Name}}Filter;
+{{- end}}
 import {{.P.domain.Name}}.{{.E.Name}}Input;
+{{- if .Refs}}
+{{- range .Refs}}
+import {{$.P.domain.Name}}.{{.Target.Name}}Repository;
+{{- end}}
+{{- end}}
 {{- if .HasTime}}
 import java.time.Instant;
 {{- end}}
 import org.junit.jupiter.api.Test;
 
 class {{.E.Name}}ServiceTest {
-
-    private final {{.E.Name}}Service service = new {{.E.Name}}Service(new InMemory{{.E.Name}}Repository());
+{{range .Refs}}
+    // An unstubbed get finds the {{.Target.Snake}}; tests make the ids they need missing.
+    private final {{.Target.Name}}Repository {{.RefVar}}Repo = mock({{.Target.Name}}Repository.class);
+{{end}}
+    private final {{.E.Name}}Service service = new {{.E.Name}}Service(new InMemory{{.E.Name}}Repository(){{range .Refs}}, {{.RefVar}}Repo{{end}});
+{{- if .Refs}}
+    private static final {{.E.Name}}Filter ALL = new {{.E.Name}}Filter({{range $i, $f := .Refs}}{{if $i}}, {{end}}0{{end}});
+{{- end}}
 
     private static {{.E.Name}}Input sample() {
         return new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.JavaSample}}{{end}});
@@ -67,10 +85,10 @@ class {{.E.Name}}ServiceTest {
         for (int i = 0; i < 3; i++) {
             service.create(sample());
         }
-        assertThat(service.list(0, 0)).hasSize(3);
-        assertThat(service.list(2, 0)).hasSize(2);
-        assertThat(service.list(2, 2)).hasSize(1);
-        assertThat(service.list(1000, -5)).hasSize(3);
+        assertThat(service.list({{if .Refs}}ALL, {{end}}0, 0)).hasSize(3);
+        assertThat(service.list({{if .Refs}}ALL, {{end}}2, 0)).hasSize(2);
+        assertThat(service.list({{if .Refs}}ALL, {{end}}2, 2)).hasSize(1);
+        assertThat(service.list({{if .Refs}}ALL, {{end}}1000, -5)).hasSize(3);
     }
 
     @Test
@@ -95,4 +113,22 @@ class {{.E.Name}}ServiceTest {
         assertThatThrownBy(() -> service.update(99, sample())).isInstanceOf(NotFoundException.class);
         assertThatThrownBy(() -> service.delete(99)).isInstanceOf(NotFoundException.class);
     }
+{{- range $r := .Refs}}
+
+    @Test
+    void createRejectsUnknown{{$r.RefGo}}() {
+        when({{$r.RefVar}}Repo.get(999L)).thenThrow(new NotFoundException());
+        {{$.E.Name}}Input in = new {{$.E.Name}}Input({{range $i, $f := $.Fields}}{{if $i}}, {{end}}{{if eq $f.Name $r.Name}}999L{{else}}{{$f.JavaSample}}{{end}}{{end}});
+        assertThatThrownBy(() -> service.create(in))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("{{$r.Target.Snake}} 999 does not exist");
+    }
+
+    @Test
+    void listFiltersBy{{$r.RefGo}}() {
+        service.create(sample());
+        assertThat(service.list(new {{$.E.Name}}Filter({{range $i, $f := $.Refs}}{{if $i}}, {{end}}{{if eq $f.Name $r.Name}}1{{else}}0{{end}}{{end}}), 0, 0)).hasSize(1);
+        assertThat(service.list(new {{$.E.Name}}Filter({{range $i, $f := $.Refs}}{{if $i}}, {{end}}{{if eq $f.Name $r.Name}}2{{else}}0{{end}}{{end}}), 0, 0)).isEmpty();
+    }
+{{- end}}
 }

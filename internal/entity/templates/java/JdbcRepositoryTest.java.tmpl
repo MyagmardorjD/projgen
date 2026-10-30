@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import {{.P.domain.Name}}.NotFoundException;
 import {{.P.domain.Name}}.{{.E.Name}};
+{{- if .Refs}}
+import {{.P.domain.Name}}.{{.E.Name}}Filter;
+{{- end}}
 import {{.P.domain.Name}}.{{.E.Name}}Input;
 {{- if .HasTime}}
 import java.time.Instant;
@@ -19,6 +22,9 @@ import javax.sql.DataSource;
 {{- if .Migrations}}
 import org.flywaydb.core.Flyway;
 {{- end}}
+{{- if .Seeds}}
+import org.junit.jupiter.api.AfterEach;
+{{- end}}
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -26,10 +32,20 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 {{- end}}
+{{- if .Seeds}}
+{{- if not .Migrations}}
+import org.springframework.dao.DataAccessException;
+{{- end}}
+import org.springframework.dao.DataIntegrityViolationException;
+{{- end}}
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 {{- if not .Migrations}}
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+{{- end}}
+{{- if .Seeds}}
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 {{- end}}
 
 /**
@@ -41,30 +57,75 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 class Jdbc{{.E.Name}}RepositoryTest {
 
     private Jdbc{{.E.Name}}Repository repo;
+{{- if .Seeds}}
+    private JdbcClient jdbc;
+{{- range .Seeds}}
+    private long {{.Var}};
+{{- end}}
+{{- end}}
 
     @BeforeEach
     void setUp(){{if not .Migrations}} throws IOException{{end}} {
         DataSource ds = new DriverManagerDataSource(System.getenv("TEST_DATABASE_URL"),
                 Objects.requireNonNullElse(System.getenv("TEST_DATABASE_USER"), ""),
                 Objects.requireNonNullElse(System.getenv("TEST_DATABASE_PASSWORD"), ""));
-        JdbcClient jdbc = JdbcClient.create(ds);
+        {{if not .Seeds}}JdbcClient {{end}}jdbc = JdbcClient.create(ds);
 {{- if .Migrations}}
         Flyway.configure().dataSource(ds).load().migrate();
         jdbc.sql("DELETE FROM {{.E.Table}}").update();
 {{- else}}
         jdbc.sql("DROP TABLE IF EXISTS {{.E.Table}}").update();
-        Resource[] scripts = new PathMatchingResourcePatternResolver()
-                .getResources("classpath:db/migration/V*__create_{{.E.Table}}.sql");
-        Resource latest = Arrays.stream(scripts)
-                .max(Comparator.comparing(Resource::getFilename))
-                .orElseThrow(() -> new IllegalStateException("no migration for {{.E.Table}}"));
-        new ResourceDatabasePopulator(latest).execute(ds);
+{{- range .Seeds}}
+        createIfMissing(ds, jdbc, "{{.Table}}");
+{{- end}}
+        runScript(ds, "{{.E.Table}}");
+{{- end}}
+{{- range .Seeds}}
+        {{.Var}} = insertParent("{{.JavaSQL}}"{{range .Args}}, {{.}}{{end}});
 {{- end}}
         repo = new Jdbc{{.E.Name}}Repository(jdbc);
     }
+{{- if not .Migrations}}
 
-    private static {{.E.Name}}Input sample() {
-        return new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.JavaSample}}{{end}});
+    /** Runs the newest migration script that creates table. */
+    private static void runScript(DataSource ds, String table) throws IOException {
+        Resource[] scripts = new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/V*__create_" + table + ".sql");
+        Resource latest = Arrays.stream(scripts)
+                .max(Comparator.comparing(Resource::getFilename))
+                .orElseThrow(() -> new IllegalStateException("no migration for " + table));
+        new ResourceDatabasePopulator(latest).execute(ds);
+    }
+{{- end}}
+{{- if .Seeds}}
+{{- if not .Migrations}}
+
+    /** Creates a table the {{.E.Table}} table refers to, unless an earlier test did. */
+    private static void createIfMissing(DataSource ds, JdbcClient jdbc, String table) throws IOException {
+        try {
+            jdbc.sql("SELECT 1 FROM " + table + " WHERE 1 = 0").query().listOfRows();
+        } catch (DataAccessException e) {
+            runScript(ds, table);
+        }
+    }
+{{- end}}
+
+    /** Stores a row a ref field can point at and returns its id. */
+    private long insertParent(String sql, Object... args) {
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.sql(sql).params(args).update(keys, "id");
+        return Objects.requireNonNull(keys.getKey()).longValue();
+    }
+
+    /** Leaves no {{.E.Table}} behind, so the tests of the tables it refers to can empty or drop theirs. */
+    @AfterEach
+    void tearDown() {
+        jdbc.sql("{{if .Migrations}}DELETE FROM{{else}}DROP TABLE IF EXISTS{{end}} {{.E.Table}}").update();
+    }
+{{- end}}
+
+    private {{if not .Seeds}}static {{end}}{{.E.Name}}Input sample() {
+        return new {{.E.Name}}Input({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{if $f.Ref}}{{$f.SeedVar}}{{else}}{{$f.JavaSample}}{{end}}{{end}});
     }
 
     @Test
@@ -72,10 +133,17 @@ class Jdbc{{.E.Name}}RepositoryTest {
         {{.E.Name}} created = repo.create(sample());
         assertThat(created.id()).isPositive();
 {{- range .Fields}}
-        assertThat(created.{{.Java}}()).isEqualTo({{.JavaSample}});
+        assertThat(created.{{.Java}}()).isEqualTo({{if .Ref}}{{.SeedVar}}{{else}}{{.JavaSample}}{{end}});
 {{- end}}
         assertThat(repo.get(created.id())).isEqualTo(created);
-        assertThat(repo.list(10, 0)).extracting({{.E.Name}}::id).contains(created.id());
+        assertThat(repo.list({{if .Refs}}new {{.E.Name}}Filter({{range $i, $f := .Refs}}{{if $i}}, {{end}}0{{end}}), {{end}}10, 0)).extracting({{.E.Name}}::id).contains(created.id());
+{{- range $r := .Refs}}
+        assertThat(repo.list(new {{$.E.Name}}Filter({{range $i, $f := $.Refs}}{{if $i}}, {{end}}{{if eq $f.Name $r.Name}}{{$r.SeedVar}}{{else}}0{{end}}{{end}}), 10, 0))
+                .extracting({{$.E.Name}}::id).containsExactly(created.id());
+        assertThat(repo.list(new {{$.E.Name}}Filter({{range $i, $f := $.Refs}}{{if $i}}, {{end}}{{if eq $f.Name $r.Name}}{{$r.SeedVar}} + 1000{{else}}0{{end}}{{end}}), 10, 0)).isEmpty();
+        assertThatThrownBy(() -> new Jdbc{{$r.Target.Name}}Repository(jdbc).delete({{$r.SeedVar}}))
+                .isInstanceOf(DataIntegrityViolationException.class);
+{{- end}}
 
         {{.E.Name}} updated = repo.update(created.id(), sample());
         assertThat(updated.createdAt()).isEqualTo(created.createdAt());

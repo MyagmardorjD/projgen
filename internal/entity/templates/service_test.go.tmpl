@@ -32,11 +32,15 @@ func Test{{.E.Name}}Service_Create(t *testing.T) {
 {{- if .Required}}
 		{"{{.JSON}} blank", func(in *{{$d}}.{{$.E.Name}}Input) { in.{{.Go}} = "  " }, {{$d}}.ErrValidation},
 {{- end}}
+{{- if .Ref}}
+		{"{{.JSON}} missing", func(in *{{$d}}.{{$.E.Name}}Input) { in.{{.Go}} = 0 }, {{$d}}.ErrValidation},
+		{"{{.JSON}} unknown", func(in *{{$d}}.{{$.E.Name}}Input) { in.{{.Go}} = 999 }, {{$d}}.ErrValidation},
+{{- end}}
 {{- end}}
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+			s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo(){{template "lookups" .}})
 			in := valid{{.E.Name}}Input()
 			tt.mutate(&in)
 			got, err := s.Create(context.Background(), in)
@@ -52,7 +56,7 @@ func Test{{.E.Name}}Service_Create(t *testing.T) {
 
 func Test{{.E.Name}}Service_GetUpdateDelete(t *testing.T) {
 	ctx := context.Background()
-	s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo())
+	s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo(){{template "lookups" .}})
 	created, err := s.Create(ctx, valid{{.E.Name}}Input())
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +96,7 @@ func Test{{.E.Name}}Service_ListPaging(t *testing.T) {
 	}
 	for _, tt := range tests {
 		repo := newFake{{.E.Name}}Repo()
-		if _, err := New{{.E.Name}}Service(repo).List(context.Background(), tt.limit, tt.offset); err != nil {
+		if _, err := New{{.E.Name}}Service(repo{{template "lookups" .}}).List(context.Background(), {{if .Refs}}{{$d}}.{{.E.Name}}Filter{}, {{end}}tt.limit, tt.offset); err != nil {
 			t.Fatal(err)
 		}
 		if repo.lastLimit != tt.wantLimit || repo.lastOffset != tt.wantOffset {
@@ -101,3 +105,21 @@ func Test{{.E.Name}}Service_ListPaging(t *testing.T) {
 		}
 	}
 }
+{{- if .Refs}}
+
+func Test{{.E.Name}}Service_ListFilter(t *testing.T) {
+	ctx := context.Background()
+	s := New{{.E.Name}}Service(newFake{{.E.Name}}Repo(){{template "lookups" .}})
+	if _, err := s.Create(ctx, valid{{.E.Name}}Input()); err != nil {
+		t.Fatal(err)
+	}
+{{- range .Refs}}
+	if got, _ := s.List(ctx, {{$d}}.{{$.E.Name}}Filter{ {{- .Go}}: 1}, 0, 0); len(got) != 1 {
+		t.Errorf("{{.JSON}} 1: got %d records, want 1", len(got))
+	}
+	if got, _ := s.List(ctx, {{$d}}.{{$.E.Name}}Filter{ {{- .Go}}: 2}, 0, 0); len(got) != 0 {
+		t.Errorf("{{.JSON}} 2: got %d records, want 0", len(got))
+	}
+{{- end}}
+}
+{{- end}}

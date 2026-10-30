@@ -2,6 +2,9 @@ package {{.P.db.Name}};
 
 import {{.P.domain.Name}}.NotFoundException;
 import {{.P.domain.Name}}.{{.E.Name}};
+{{- if .Refs}}
+import {{.P.domain.Name}}.{{.E.Name}}Filter;
+{{- end}}
 import {{.P.domain.Name}}.{{.E.Name}}Input;
 import {{.P.domain.Name}}.{{.E.Name}}Repository;
 import java.time.Instant;
@@ -41,8 +44,12 @@ public class InMemory{{.E.Name}}Repository implements {{.E.Name}}Repository {
     }
 
     @Override
-    public List<{{.E.Name}}> list(int limit, int offset) {
-        return rows.values().stream().skip(offset).limit(limit).toList();
+    public List<{{.E.Name}}> list({{if .Refs}}{{.E.Name}}Filter filter, {{end}}int limit, int offset) {
+        return rows.values().stream()
+{{- range .Refs}}
+                .filter(x -> filter.{{.Java}}() <= 0 || x.{{.Java}}() == filter.{{.Java}}())
+{{- end}}
+                .skip(offset).limit(limit).toList();
     }
 
     @Override

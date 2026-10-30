@@ -55,7 +55,7 @@ func TestAddJava_AllCombinations(t *testing.T) {
 			if len(res.Created) != wantFiles {
 				t.Errorf("created %d files, want %d: %v", len(res.Created), wantFiles, res.Created)
 			}
-			res2 := mustAdd(t, dir, "order_item", []string{"quantity:int", "note:string"})
+			res2 := mustAdd(t, dir, "order_item", itemFields)
 			if len(res2.Skipped) != 3 {
 				t.Errorf("second entity skipped = %v, want the 3 shared files", res2.Skipped)
 			}
@@ -179,7 +179,7 @@ func TestAddedJava_BuildAndTest(t *testing.T) {
 		t.Run(javaName(o), func(t *testing.T) {
 			dir := newProject(t, o)
 			mustAdd(t, dir, "Product", testFields)
-			mustAdd(t, dir, "order_item", []string{"quantity:int", "note:string"})
+			mustAdd(t, dir, "order_item", itemFields)
 			mvnw(t, dir, nil)
 		})
 	}
@@ -211,6 +211,7 @@ func TestAddedJava_RealDatabase(t *testing.T) {
 				}
 				dir := newProject(t, o)
 				mustAdd(t, dir, "Product", testFields)
+				mustAdd(t, dir, "order_item", itemFields)
 				mvnw(t, dir, []string{
 					"TEST_DATABASE_URL=" + urls[db],
 					"TEST_DATABASE_USER=" + os.Getenv("PROJGEN_TEST_DB_USER"),

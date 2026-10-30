@@ -58,7 +58,20 @@ func (h {{$h}}) create(c *gin.Context) {
 
 func (h {{$h}}) list(c *gin.Context) {
 	limit, offset := pageParams(c.Query("limit"), c.Query("offset"))
-	items, err := h.s.List(c.Request.Context(), limit, offset)
+{{- if .Refs}}
+	var f {{$d}}.{{.E.Name}}Filter
+{{- range .Refs}}
+	if v := c.Query("{{.JSON}}"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid {{.JSON}}"})
+			return
+		}
+		f.{{.Go}} = id
+	}
+{{- end}}
+{{- end}}
+	items, err := h.s.List(c.Request.Context(), {{if .Refs}}f, {{end}}limit, offset)
 	if err != nil {
 		entityError(c, h.log, err)
 		return
@@ -144,7 +157,19 @@ func (h {{$h}}) create(c echo.Context) error {
 
 func (h {{$h}}) list(c echo.Context) error {
 	limit, offset := pageParams(c.QueryParam("limit"), c.QueryParam("offset"))
-	items, err := h.s.List(c.Request().Context(), limit, offset)
+{{- if .Refs}}
+	var f {{$d}}.{{.E.Name}}Filter
+{{- range .Refs}}
+	if v := c.QueryParam("{{.JSON}}"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid {{.JSON}}"})
+		}
+		f.{{.Go}} = id
+	}
+{{- end}}
+{{- end}}
+	items, err := h.s.List(c.Request().Context(), {{if .Refs}}f, {{end}}limit, offset)
 	if err != nil {
 		return entityError(c, h.log, err)
 	}
@@ -222,7 +247,19 @@ func (h {{$h}}) create(c *fiber.Ctx) error {
 
 func (h {{$h}}) list(c *fiber.Ctx) error {
 	limit, offset := pageParams(c.Query("limit"), c.Query("offset"))
-	items, err := h.s.List(c.UserContext(), limit, offset)
+{{- if .Refs}}
+	var f {{$d}}.{{.E.Name}}Filter
+{{- range .Refs}}
+	if v := c.Query("{{.JSON}}"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid {{.JSON}}"})
+		}
+		f.{{.Go}} = id
+	}
+{{- end}}
+{{- end}}
+	items, err := h.s.List(c.UserContext(), {{if .Refs}}f, {{end}}limit, offset)
 	if err != nil {
 		return entityError(c, h.log, err)
 	}
@@ -303,7 +340,20 @@ func (h {{$h}}) create(w http.ResponseWriter, r *http.Request) {
 func (h {{$h}}) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := pageParams(q.Get("limit"), q.Get("offset"))
-	items, err := h.s.List(r.Context(), limit, offset)
+{{- if .Refs}}
+	var f {{$d}}.{{.E.Name}}Filter
+{{- range .Refs}}
+	if v := q.Get("{{.JSON}}"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid {{.JSON}}"})
+			return
+		}
+		f.{{.Go}} = id
+	}
+{{- end}}
+{{- end}}
+	items, err := h.s.List(r.Context(), {{if .Refs}}f, {{end}}limit, offset)
 	if err != nil {
 		entityError(w, r, h.log, err)
 		return

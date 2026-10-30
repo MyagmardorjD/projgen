@@ -8,8 +8,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+{{- if .Refs}}
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+{{- end}}
 
 import {{.P.db.Name}}.InMemory{{.E.Name}}Repository;
+{{- if .Refs}}
+import {{.P.domain.Name}}.NotFoundException;
+{{- range .Refs}}
+import {{$.P.domain.Name}}.{{.Target.Name}}Repository;
+{{- end}}
+{{- end}}
 import {{.P.service.Name}}.{{.E.Name}}Service;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -22,8 +32,13 @@ class {{.E.Name}}ControllerTest {
     private static final String BODY = """
             { {{- .SampleJSON -}} }""";
 
+{{- range .Refs}}
+
+    private final {{.Target.Name}}Repository {{.RefVar}}Repo = mock({{.Target.Name}}Repository.class);
+{{- end}}
+
     private final MockMvc mvc = MockMvcBuilders
-            .standaloneSetup(new {{.E.Name}}Controller(new {{.E.Name}}Service(new InMemory{{.E.Name}}Repository())))
+            .standaloneSetup(new {{.E.Name}}Controller(new {{.E.Name}}Service(new InMemory{{.E.Name}}Repository(){{range .Refs}}, {{.RefVar}}Repo{{end}})))
             .setControllerAdvice(new EntityExceptionHandler(), new ApiExceptionHandler())
             .build();
 
@@ -70,6 +85,32 @@ class {{.E.Name}}ControllerTest {
         mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().is(422))
                 .andExpect(content().string(containsString("{{.FirstRequired.JSON}} is required")));
+    }
+{{- end}}
+{{- range $r := .Refs}}
+
+    @Test
+    void unknown{{$r.RefGo}}IsUnprocessable() throws Exception {
+        when({{$r.RefVar}}Repo.get(999L)).thenThrow(new NotFoundException());
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON)
+                        .content("{ {{- range $i, $f := $.Fields}}{{if $i}},{{end}}\"{{$f.JSON}}\":{{if eq $f.Name $r.Name}}999{{else}}{{js $f.SampleJSON}}{{end}}{{end -}} }"))
+                .andExpect(status().is(422))
+                .andExpect(content().string(containsString("{{$r.Target.Snake}} 999 does not exist")));
+    }
+
+    @Test
+    void listFiltersBy{{$r.RefGo}}() throws Exception {
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isCreated());
+        mvc.perform(get(PATH).param("{{$r.JSON}}", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+        mvc.perform(get(PATH).param("{{$r.JSON}}", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(get(PATH).param("{{$r.JSON}}", "abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("invalid {{$r.JSON}}")));
     }
 {{- end}}
 }

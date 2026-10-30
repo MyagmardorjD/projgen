@@ -41,14 +41,16 @@ func (r *{{.E.Name}}Repository) Get(_ context.Context, id int64) ({{$d}}.{{.E.Na
 	return x, nil
 }
 
-func (r *{{.E.Name}}Repository) List(_ context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+func (r *{{.E.Name}}Repository) List(_ context.Context, {{if .Refs}}f {{$d}}.{{.E.Name}}Filter, {{end}}limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := []{{$d}}.{{.E.Name}}{}
 	for id := int64(1); id <= r.next && len(out) < offset+limit; id++ {
-		if x, ok := r.items[id]; ok {
-			out = append(out, x)
+		x, ok := r.items[id]
+		if !ok {{range .Refs}}|| f.{{.Go}} > 0 && x.{{.Go}} != f.{{.Go}} {{end}}{
+			continue
 		}
+		out = append(out, x)
 	}
 	if offset >= len(out) {
 		return []{{$d}}.{{.E.Name}}{}, nil

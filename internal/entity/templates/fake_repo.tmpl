@@ -33,15 +33,17 @@ func (f *fake{{.E.Name}}Repo) Get(_ context.Context, id int64) ({{$d}}.{{.E.Name
 	return x, nil
 }
 
-func (f *fake{{.E.Name}}Repo) List(_ context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+func (f *fake{{.E.Name}}Repo) List(_ context.Context, {{if .Refs}}filter {{$d}}.{{.E.Name}}Filter, {{end}}limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastLimit, f.lastOffset = limit, offset
 	out := []{{$d}}.{{.E.Name}}{}
 	for id := int64(1); id <= f.next; id++ {
-		if x, ok := f.items[id]; ok {
-			out = append(out, x)
+		x, ok := f.items[id]
+		if !ok {{range .Refs}}|| filter.{{.Go}} > 0 && x.{{.Go}} != filter.{{.Go}} {{end}}{
+			continue
 		}
+		out = append(out, x)
 	}
 	if offset >= len(out) {
 		return []{{$d}}.{{.E.Name}}{}, nil
@@ -77,3 +79,18 @@ func (f *fake{{.E.Name}}Repo) Delete(_ context.Context, id int64) error {
 	delete(f.items, id)
 	return nil
 }
+
+{{- range .Refs}}
+
+// fake{{$.E.Name}}{{.RefGo}}Lookup stands in for the {{.Target.Name}} service: ids 1 and 2 exist.
+type fake{{$.E.Name}}{{.RefGo}}Lookup struct{}
+
+func (fake{{$.E.Name}}{{.RefGo}}Lookup) Get(_ context.Context, id int64) ({{$d}}.{{.Target.Name}}, error) {
+	if id == 1 || id == 2 {
+		return {{$d}}.{{.Target.Name}}{ID: id}, nil
+	}
+	return {{$d}}.{{.Target.Name}}{}, {{$d}}.ErrNotFound
+}
+{{- end}}
+
+{{- define "lookups"}}{{range .Refs}}, fake{{$.E.Name}}{{.RefGo}}Lookup{}{{end}}{{end}}

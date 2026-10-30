@@ -38,6 +38,11 @@ public record {{.E.Name}}Input(
             problems.add("{{.JSON}} must be at most 255 characters");
         }
 {{- end}}
+{{- if eq .Type "ref"}}
+        if ({{.Java}} <= 0) {
+            problems.add("{{.JSON}} is required");
+        }
+{{- end}}
 {{- if eq .Type "time"}}
         if ({{.Java}} == null) {
             problems.add("{{.JSON}} is required");

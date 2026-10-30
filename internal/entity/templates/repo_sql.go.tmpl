@@ -6,6 +6,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+{{- if .Refs}}
+	"strings"
+{{- end}}
 
 	"{{.P.domain.Import}}"
 )
@@ -33,6 +36,7 @@ func (r *{{.E.Name}}Repository) Create(ctx context.Context, in {{$d}}.{{.E.Name}
 		"INSERT INTO {{.E.Table}} ({{.SQL.InsertCols}}) VALUES ({{.SQL.InsertVals}}) RETURNING "+{{.E.Var}}Columns,
 		{{.SQL.ExecArgs}})
 	x, err := scan{{.E.Name}}(row)
+{{- template "refMissing" .}}
 	if err != nil {
 		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("insert {{.E.Snake}}: %w", err)
 	}
@@ -41,6 +45,7 @@ func (r *{{.E.Name}}Repository) Create(ctx context.Context, in {{$d}}.{{.E.Name}
 	res, err := r.db.ExecContext(ctx,
 		"INSERT INTO {{.E.Table}} ({{.SQL.InsertCols}}) VALUES ({{.SQL.InsertVals}})",
 		{{.SQL.ExecArgs}})
+{{- template "refMissing" .}}
 	if err != nil {
 		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("insert {{.E.Snake}}: %w", err)
 	}
@@ -64,9 +69,35 @@ func (r *{{.E.Name}}Repository) Get(ctx context.Context, id int64) ({{$d}}.{{.E.
 	return x, nil
 }
 
+{{- if .Refs}}
+func (r *{{.E.Name}}Repository) List(ctx context.Context, f {{$d}}.{{.E.Name}}Filter, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
+	var where []string
+	var args []any
+{{- if eq .Opt.Database "postgresql"}}
+	ph := func() string { return fmt.Sprintf("$%d", len(args)) }
+{{- else}}
+	ph := func() string { return "?" }
+{{- end}}
+{{- range .Refs}}
+	if f.{{.Go}} > 0 {
+		args = append(args, f.{{.Go}})
+		where = append(where, "{{.Column}} = "+ph())
+	}
+{{- end}}
+	query := "SELECT " + {{.E.Var}}Columns + " FROM {{.E.Table}}"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	args = append(args, limit)
+	query += " ORDER BY id LIMIT " + ph()
+	args = append(args, offset)
+	query += " OFFSET " + ph()
+	rows, err := r.db.QueryContext(ctx, query, args...)
+{{- else}}
 func (r *{{.E.Name}}Repository) List(ctx context.Context, limit, offset int) ([]{{$d}}.{{.E.Name}}, error) {
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT "+{{.E.Var}}Columns+" FROM {{.E.Table}} ORDER BY id LIMIT {{.SQL.P1}} OFFSET {{.SQL.P2}}", limit, offset)
+{{- end}}
 	if err != nil {
 		return nil, fmt.Errorf("list {{.E.Table}}: %w", err)
 	}
@@ -90,6 +121,7 @@ func (r *{{.E.Name}}Repository) Update(ctx context.Context, id int64, in {{$d}}.
 	x, err := scan{{.E.Name}}(r.db.QueryRowContext(ctx,
 		"UPDATE {{.E.Table}} SET {{.SQL.UpdateSet}}, updated_at = now() WHERE id = {{.SQL.UpdateWhere}} RETURNING "+{{.E.Var}}Columns,
 		{{.SQL.ExecArgs}}, id))
+{{- template "refMissing" .}}
 	if errors.Is(err, sql.ErrNoRows) {
 		return {{$d}}.{{.E.Name}}{}, {{$d}}.ErrNotFound
 	}
@@ -98,9 +130,11 @@ func (r *{{.E.Name}}Repository) Update(ctx context.Context, id int64, in {{$d}}.
 	}
 	return x, nil
 {{- else}}
-	if _, err := r.db.ExecContext(ctx,
+	_, err := r.db.ExecContext(ctx,
 		"UPDATE {{.E.Table}} SET {{.SQL.UpdateSet}} WHERE id = {{.SQL.UpdateWhere}}",
-		{{.SQL.ExecArgs}}, id); err != nil {
+		{{.SQL.ExecArgs}}, id)
+{{- template "refMissing" .}}
+	if err != nil {
 		return {{$d}}.{{.E.Name}}{}, fmt.Errorf("update {{.E.Snake}}: %w", err)
 	}
 	return r.Get(ctx, id)
@@ -110,6 +144,9 @@ func (r *{{.E.Name}}Repository) Update(ctx context.Context, id int64, in {{$d}}.
 func (r *{{.E.Name}}Repository) Delete(ctx context.Context, id int64) error {
 	res, err := r.db.ExecContext(ctx, "DELETE FROM {{.E.Table}} WHERE id = {{.SQL.P1}}", id)
 	if err != nil {
+		if isForeignKeyViolation(err) {
+			return fmt.Errorf("%w: other records still refer to this {{.E.Snake}}", {{$d}}.ErrConflict)
+		}
 		return fmt.Errorf("delete {{.E.Snake}}: %w", err)
 	}
 	n, err := res.RowsAffected()
@@ -121,3 +158,12 @@ func (r *{{.E.Name}}Repository) Delete(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+{{- define "refMissing"}}
+{{- if .Refs}}
+	if isForeignKeyViolation(err) {
+		// The service checked the ids, but a referred record was deleted since.
+		return {{.P.domain.Name}}.{{.E.Name}}{}, fmt.Errorf("%w: a referred record no longer exists", {{.P.domain.Name}}.ErrValidation)
+	}
+{{- end}}
+{{- end}}
