@@ -7,7 +7,13 @@ CREATE TABLE {{.E.Table}} (
 {{- end}}
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+{{- range .Refs}},
+    CONSTRAINT {{.FK}} FOREIGN KEY ({{.Column}}) REFERENCES {{.Target.Table}} (id)
+{{- end}}
 );
+{{- range .Refs}}
+CREATE INDEX {{.Index}} ON {{$.E.Table}} ({{.Column}});
+{{- end}}
 {{- else}}
 CREATE TABLE {{.E.Table}} (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -16,5 +22,8 @@ CREATE TABLE {{.E.Table}} (
 {{- end}}
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+{{- range .Refs}},
+    CONSTRAINT {{.FK}} FOREIGN KEY ({{.Column}}) REFERENCES {{.Target.Table}} (id)
+{{- end}}
 );
 {{- end}}

@@ -3,8 +3,17 @@ package {{.P.service.Name}};
 import {{.P.domain.Name}}.NotFoundException;
 import {{.P.domain.Name}}.ValidationException;
 import {{.P.domain.Name}}.{{.E.Name}};
+{{- if .Refs}}
+import {{.P.domain.Name}}.{{.E.Name}}Filter;
+{{- end}}
 import {{.P.domain.Name}}.{{.E.Name}}Input;
 import {{.P.domain.Name}}.{{.E.Name}}Repository;
+{{- if .Refs}}
+{{- range .Refs}}
+import {{$.P.domain.Name}}.{{.Target.Name}}Repository;
+{{- end}}
+import java.util.ArrayList;
+{{- end}}
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -16,14 +25,23 @@ public class {{.E.Name}}Service {
     static final int MAX_PAGE_SIZE = 100;
 
     private final {{.E.Name}}Repository repo;
+{{- range .Refs}}
+    private final {{.Target.Name}}Repository {{.RefVar}}Repo;
+{{- end}}
 
-    public {{.E.Name}}Service({{.E.Name}}Repository repo) {
+    public {{.E.Name}}Service({{.E.Name}}Repository repo{{range .Refs}}, {{.Target.Name}}Repository {{.RefVar}}Repo{{end}}) {
         this.repo = repo;
+{{- range .Refs}}
+        this.{{.RefVar}}Repo = {{.RefVar}}Repo;
+{{- end}}
     }
 
     /** Validates in and stores a new record. */
     public {{.E.Name}} create({{.E.Name}}Input in) {
         validate(in);
+{{- if .Refs}}
+        checkRefs(in);
+{{- end}}
         return repo.create(in);
     }
 
@@ -36,12 +54,12 @@ public class {{.E.Name}}Service {
     }
 
     /** Returns one page ordered by id. limit defaults to 20 and is capped at 100. */
-    public List<{{.E.Name}}> list(int limit, int offset) {
+    public List<{{.E.Name}}> list({{if .Refs}}{{.E.Name}}Filter filter, {{end}}int limit, int offset) {
         if (limit <= 0) {
             limit = DEFAULT_PAGE_SIZE;
         }
         limit = Math.min(limit, MAX_PAGE_SIZE);
-        return repo.list(limit, Math.max(offset, 0));
+        return repo.list({{if .Refs}}filter, {{end}}limit, Math.max(offset, 0));
     }
 
     /** Validates in and replaces the record's fields. */
@@ -50,6 +68,9 @@ public class {{.E.Name}}Service {
         if (id <= 0) {
             throw new NotFoundException();
         }
+{{- if .Refs}}
+        checkRefs(in);
+{{- end}}
         return repo.update(id, in);
     }
 
@@ -67,4 +88,21 @@ public class {{.E.Name}}Service {
             throw new ValidationException(problems);
         }
     }
+{{- if .Refs}}
+
+    /** Reports every referred record that does not exist as a validation problem. */
+    private void checkRefs({{.E.Name}}Input in) {
+        List<String> problems = new ArrayList<>();
+{{- range .Refs}}
+        try {
+            {{.RefVar}}Repo.get(in.{{.Java}}());
+        } catch (NotFoundException e) {
+            problems.add("{{.JSON}}: {{.Target.Snake}} " + in.{{.Java}}() + " does not exist");
+        }
+{{- end}}
+        if (!problems.isEmpty()) {
+            throw new ValidationException(problems);
+        }
+    }
+{{- end}}
 }

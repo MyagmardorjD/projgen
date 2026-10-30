@@ -152,7 +152,7 @@ module_prefix: gitlab.techpartners.asia/backend   # module = <prefix>/<нэр>
 projgen add entity Product name:string:required description:text price:float stock:int active:bool released_at:time
 ```
 
-Go болон Java төсөлд ажиллана. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`. `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ. Нэг секундэд хэд хэдэн entity нэмсэн ч migration-ий хувилбар давхцахгүй.
+Go болон Java төсөлд ажиллана. Талбар нь `нэр:төрөл` эсвэл `нэр:төрөл:required` (required нь string, text-д). Төрлүүд: `string` (255 тэмдэгт), `text`, `int`, `int64`, `float`, `bool`, `time`, `ref` (доорхыг үз). `id`, `created_at`, `updated_at` автоматаар нэмэгдэнэ. Нэг секундэд хэд хэдэн entity нэмсэн ч migration-ий хувилбар давхцахгүй.
 
 `project.yaml`-аас хэл, бүтэц, framework, DB-г уншаад тухайн бүтэцт тохируулж үүсгэнэ. Go төсөлд:
 
@@ -182,7 +182,29 @@ Java (Spring Boot) төсөлд:
 
 Spring component scan хийдэг тул юу ч гараар холбох шаардлагагүй. Java-гийн түлхүүр үг (`class`, `new` г.м.) болон `String`, `List` зэрэг класстай давхцах нэрийг хүлээж авахгүй. Хоосон ирсэн тоо, bool талбар 0/false болно, `time` талбарыг заавал илгээнэ.
 
-Алдааны хариу (хоёр хэлэнд ижил): шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`.
+Алдааны хариу (хоёр хэлэнд ижил): шалгалт буруу бол `422`, олдоогүй бол `404`, буруу id/JSON бол `400`, өөр бичлэг холбогдсон тул устгах боломжгүй бол `409`.
+
+### Entity хоорондын холбоо (`ref`)
+
+```bash
+projgen add entity Customer name:string:required
+projgen add entity Order total:float customer:ref          # Customer-ийг заана
+projgen add entity Post title:string author:ref:Person      # талбарын нэр entity-ийн нэрээс өөр бол
+```
+
+`customer:ref` нь `customer_id` багана, JSON талбар үүсгэнэ (заавал бөглөнө, `_id`-гүйгээр бичнэ). Заасан entity төсөлд аль хэдийн байх ёстой. Үүсэх зүйлс (Go, Java аль алинд):
+
+| Юу | Хэрхэн |
+| --- | --- |
+| Migration | `FOREIGN KEY (customer_id) REFERENCES customers (id)`. PostgreSQL дээр `customer_id`-д index нэмнэ (MySQL өөрөө үүсгэдэг) |
+| Үүсгэх, засах | Service нь `Customer` байгаа эсэхийг шалгана. Байхгүй бол `422 customer_id: customer 42 does not exist` |
+| Жагсаалт | `GET /api/v1/orders?customer_id=5` нь тухайн customer-ийн бичлэгүүдийг буцаана. Буруу утга бол `400` |
+| Эцэг бичлэгийг устгах | Холбогдсон бичлэг байвал DB татгалзаж, `409 Conflict` буцаана |
+| Тест | Service, handler-ийн тестэд эцэг entity-г stub (Go) эсвэл Mockito mock (Java)-оор орлуулна. Repository тест эцэг мөрүүдийг migration-оос уншиж seed хийнэ |
+
+Go дээр `main.go`-д `deps.Orders = ...NewOrderService(..., deps.Customers)` гэж холбогдоно. Ref-ээс өмнө үүссэн төсөлд `errors.go`, `entity_helpers.go`, эцэг repository-г `409` буцаадаг болгож автоматаар засна. Засах боломжгүй бол гараар хийх алхмыг хэвлэнэ. Java дээр `EntityExceptionHandler`-т `DataIntegrityViolationException` → `409` нэмэгдэнэ.
+
+Хязгаарлалт: ref нь үргэлж заавал (nullable биш), entity өөрийгөө заах боломжгүй (жишээ нь `Category.parent`). DB-гүй (санах ойн) төсөлд эцэг бичлэгийг устгахад саадгүй.
 
 ## Технологийн хувилбарууд
 

@@ -83,6 +83,9 @@ func TestParse(t *testing.T) {
 var testFields = []string{"name:string:required", "description:text", "price:float", "stock:int",
 	"weight:int64", "active:bool", "released_at:time"}
 
+// itemFields belong to a second entity that refers to Product.
+var itemFields = []string{"quantity:int", "note:string", "product:ref"}
+
 func combos() []options.Options {
 	var out []options.Options
 	for _, fw := range options.Frameworks["go"] {
@@ -136,16 +139,20 @@ func TestAdd_AllCombinations(t *testing.T) {
 			}
 			wantFiles := 8
 			if o.Database != "none" {
-				wantFiles = 11
+				wantFiles = 12
 			}
 			if len(res.Created) != wantFiles {
 				t.Errorf("created %d files, want %d: %v", len(res.Created), wantFiles, res.Created)
 			}
 
 			// A second entity reuses the shared files and wires up next to the first.
-			res2 := mustAdd(t, dir, "order_item", []string{"quantity:int", "note:string"})
-			if len(res2.Skipped) != 2 {
-				t.Errorf("second entity skipped = %v, want errors.go and entity_helpers.go", res2.Skipped)
+			res2 := mustAdd(t, dir, "order_item", itemFields)
+			wantSkipped := 2
+			if o.Database != "none" {
+				wantSkipped = 3
+			}
+			if len(res2.Skipped) != wantSkipped || len(res2.Manual) != 0 {
+				t.Errorf("second entity skipped = %v, manual = %v; want the shared files and no manual steps", res2.Skipped, res2.Manual)
 			}
 			d := generator.NewData(o, versions.Defaults())
 			router, _ := os.ReadFile(filepath.Join(dir, d.P["http"].Dir, "router.go"))
@@ -155,7 +162,7 @@ func TestAdd_AllCombinations(t *testing.T) {
 				}
 			}
 			main, _ := os.ReadFile(filepath.Join(dir, "cmd", "server", "main.go"))
-			for _, want := range []string{"deps.Products = ", "deps.OrderItems = ", d.P["db"].Import} {
+			for _, want := range []string{"deps.Products = ", "deps.OrderItems = ", ", deps.Products)", d.P["db"].Import} {
 				if !strings.Contains(string(main), want) {
 					t.Errorf("main.go missing %q", want)
 				}
@@ -234,7 +241,7 @@ func TestAdded_BuildAndTest(t *testing.T) {
 		t.Run(o.Framework+"-"+o.Architecture+"-"+o.Database, func(t *testing.T) {
 			dir := newProject(t, o)
 			mustAdd(t, dir, "Product", testFields)
-			mustAdd(t, dir, "order_item", []string{"quantity:int", "note:string"})
+			mustAdd(t, dir, "order_item", itemFields)
 			goRun(t, dir, nil, "mod", "tidy")
 			goRun(t, dir, nil, "vet", "./...")
 			goRun(t, dir, nil, "test", "./...")
@@ -259,6 +266,7 @@ func TestAdded_RealDatabase(t *testing.T) {
 				Framework: "gin", Architecture: "clean", Database: db, Extras: []string{"migrations"}}
 			dir := newProject(t, o)
 			mustAdd(t, dir, "Product", testFields)
+			mustAdd(t, dir, "order_item", itemFields)
 			goRun(t, dir, nil, "mod", "tidy")
 			goRun(t, dir, []string{"TEST_DATABASE_URL=" + urls[db]}, "test", "-count=1", "-run", "Repository|Migrate", "-v", "./...")
 		})
@@ -274,8 +282,8 @@ func TestPreview_WritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 11 || len(res.Modified) != 2 {
-		t.Errorf("preview created = %d, modified = %v; want 11 and router.go, main.go", len(res.Created), res.Modified)
+	if len(res.Created) != 12 || len(res.Modified) != 2 {
+		t.Errorf("preview created = %d, modified = %v; want 12 and router.go, main.go", len(res.Created), res.Modified)
 	}
 	for _, f := range res.Created {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err == nil {

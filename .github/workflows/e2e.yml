@@ -22,8 +22,10 @@ on:
 permissions:
   contents: read
 
+# One run per branch: a newer run replaces an older one on the same branch,
+# but a push to main never cancels a run checking another branch.
 concurrency:
-  group: e2e
+  group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

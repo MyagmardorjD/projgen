@@ -55,7 +55,7 @@ func TestAddJava_AllCombinations(t *testing.T) {
 			if len(res.Created) != wantFiles {
 				t.Errorf("created %d files, want %d: %v", len(res.Created), wantFiles, res.Created)
 			}
-			res2 := mustAdd(t, dir, "order_item", []string{"quantity:int", "note:string"})
+			res2 := mustAdd(t, dir, "order_item", itemFields)
 			if len(res2.Skipped) != 3 {
 				t.Errorf("second entity skipped = %v, want the 3 shared files", res2.Skipped)
 			}
@@ -83,6 +83,11 @@ func TestAddJava_AllCombinations(t *testing.T) {
 			controller, _ := os.ReadFile(filepath.Join(dir, d.P["http"].Dir, "ProductController.java"))
 			if !strings.Contains(string(controller), `@RequestMapping("/api/v1/products")`) {
 				t.Error("ProductController is not mapped to /api/v1/products")
+			}
+			// spring-dao (and so the 409 mapping) is only on the classpath with a database.
+			handler, _ := os.ReadFile(filepath.Join(dir, d.P["http"].Dir, "EntityExceptionHandler.java"))
+			if strings.Contains(string(handler), "org.springframework.dao") != (o.Database != "none") {
+				t.Errorf("EntityExceptionHandler imports spring-dao with database %s; want it only with a database", o.Database)
 			}
 			memory := filepath.Join(dir, d.P["db"].Dir, "InMemoryProductRepository.java")
 			if _, err := os.Stat(memory); (err == nil) != (o.Database == "none") {
@@ -179,7 +184,7 @@ func TestAddedJava_BuildAndTest(t *testing.T) {
 		t.Run(javaName(o), func(t *testing.T) {
 			dir := newProject(t, o)
 			mustAdd(t, dir, "Product", testFields)
-			mustAdd(t, dir, "order_item", []string{"quantity:int", "note:string"})
+			mustAdd(t, dir, "order_item", itemFields)
 			mvnw(t, dir, nil)
 		})
 	}
@@ -211,6 +216,7 @@ func TestAddedJava_RealDatabase(t *testing.T) {
 				}
 				dir := newProject(t, o)
 				mustAdd(t, dir, "Product", testFields)
+				mustAdd(t, dir, "order_item", itemFields)
 				mvnw(t, dir, []string{
 					"TEST_DATABASE_URL=" + urls[db],
 					"TEST_DATABASE_USER=" + os.Getenv("PROJGEN_TEST_DB_USER"),

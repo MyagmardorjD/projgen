@@ -2,12 +2,18 @@ package {{.P.db.Name}};
 
 import {{.P.domain.Name}}.NotFoundException;
 import {{.P.domain.Name}}.{{.E.Name}};
+{{- if .Refs}}
+import {{.P.domain.Name}}.{{.E.Name}}Filter;
+{{- end}}
 import {{.P.domain.Name}}.{{.E.Name}}Input;
 import {{.P.domain.Name}}.{{.E.Name}}Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 {{- if .HasTime}}
 import java.sql.Timestamp;
+{{- end}}
+{{- if .Refs}}
+import java.util.ArrayList;
 {{- end}}
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -59,6 +65,26 @@ public class Jdbc{{.E.Name}}Repository implements {{.E.Name}}Repository {
                 .orElseThrow(NotFoundException::new);
     }
 
+{{- if .Refs}}
+    @Override
+    public List<{{.E.Name}}> list({{.E.Name}}Filter filter, int limit, int offset) {
+        List<String> where = new ArrayList<>();
+        List<Object> params = new ArrayList<>();
+{{- range .Refs}}
+        if (filter.{{.Java}}() > 0) {
+            where.add("{{.Column}} = ?");
+            params.add(filter.{{.Java}}());
+        }
+{{- end}}
+        params.add(limit);
+        params.add(offset);
+        String condition = where.isEmpty() ? "" : " WHERE " + String.join(" AND ", where);
+        return jdbc.sql("SELECT " + COLUMNS + " FROM {{.E.Table}}" + condition + " ORDER BY id LIMIT ? OFFSET ?")
+                .params(params)
+                .query(Jdbc{{.E.Name}}Repository::map)
+                .list();
+    }
+{{- else}}
     @Override
     public List<{{.E.Name}}> list(int limit, int offset) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM {{.E.Table}} ORDER BY id LIMIT ? OFFSET ?")
@@ -66,6 +92,7 @@ public class Jdbc{{.E.Name}}Repository implements {{.E.Name}}Repository {
                 .query(Jdbc{{.E.Name}}Repository::map)
                 .list();
     }
+{{- end}}
 
     @Override
     public {{.E.Name}} update(long id, {{.E.Name}}Input in) {

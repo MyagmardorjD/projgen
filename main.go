@@ -107,7 +107,8 @@ Usage:
   projgen new [flags]   create a project (asks questions unless --config is given)
   projgen add entity NAME FIELD...
                         add a CRUD resource to the project in the current folder
-                        FIELD is name:type or name:type:required
+                        FIELD is name:type or name:type:required;
+                        customer:ref (or owner:ref:User) refers to an existing entity
   projgen preset list   show presets (built-in, team folders in PROJGEN_PRESETS, your own)
   projgen preset save NAME [--from project.yaml] [--description TEXT] [--force]
                         save a project's choices as your preset

@@ -13,8 +13,17 @@ import (
 // Field is one column of an entity.
 type Field struct {
 	Name     string // snake_case, as typed: "category_id"
-	Type     string // string | text | int | int64 | float | bool | time
+	Type     string // string | text | int | int64 | float | bool | time | ref
 	Required bool   // strings must be non-empty
+	Ref      string // for ref: the entity referred to, as typed: "Customer"
+}
+
+// Column is the field's column and JSON name: a ref "customer" is stored in customer_id.
+func (f Field) Column() string {
+	if f.Type == "ref" {
+		return f.Name + "_id"
+	}
+	return f.Name
 }
 
 // Spec is a parsed "projgen add entity" request.
@@ -23,10 +32,10 @@ type Spec struct {
 	Fields []Field
 }
 
-var types = map[string]bool{"string": true, "text": true, "int": true, "int64": true, "float": true, "bool": true, "time": true}
+var types = map[string]bool{"string": true, "text": true, "int": true, "int64": true, "float": true, "bool": true, "time": true, "ref": true}
 
 // TypeNames lists the supported field types for help text.
-const TypeNames = "string, text, int, int64, float, bool, time"
+const TypeNames = "string, text, int, int64, float, bool, time, ref"
 
 var (
 	entityRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,40}$`)
@@ -39,7 +48,8 @@ var reserved = []string{"all", "and", "as", "by", "case", "check", "column", "de
 	"primary", "references", "select", "table", "to", "union", "unique", "user", "where", "with",
 	"groups", "keys", "rows"} // reserved table names in MySQL 8
 
-// Parse reads "Product" and "name:string:required" style arguments.
+// Parse reads "Product" and "name:string:required" style arguments. A ref
+// field, "customer:ref" or "owner:ref:User", refers to an existing entity.
 func Parse(name string, args []string) (Spec, error) {
 	var errs []error
 	if !entityRe.MatchString(name) {
@@ -59,28 +69,42 @@ func Parse(name string, args []string) (Spec, error) {
 			continue
 		}
 		f := Field{Name: parts[0], Type: parts[1]}
-		if len(parts) == 3 {
+		if f.Type == "ref" {
+			// A ref is always required; "required" is accepted and changes nothing.
+			f.Ref = f.Name
+			if len(parts) == 3 && parts[2] != "required" {
+				f.Ref = parts[2]
+			}
+		} else if len(parts) == 3 {
 			if parts[2] != "required" {
 				errs = append(errs, fmt.Errorf("field %q: the only modifier is \"required\"", a))
 				continue
 			}
 			f.Required = true
 		}
+		col := f.Column()
 		switch {
 		case !fieldRe.MatchString(f.Name):
 			errs = append(errs, fmt.Errorf("field %q: use snake_case, e.g. unit_price", f.Name))
 		case f.Name == "id" || f.Name == "created_at" || f.Name == "updated_at":
 			errs = append(errs, fmt.Errorf("field %q is added automatically", f.Name))
-		case slices.Contains(reserved, f.Name):
+		case slices.Contains(reserved, col):
 			errs = append(errs, fmt.Errorf("field %q is an SQL keyword; choose another", f.Name))
 		case !types[f.Type]:
 			errs = append(errs, fmt.Errorf("field %q: type %q not supported; use one of: %s", f.Name, f.Type, TypeNames))
 		case f.Required && f.Type != "string" && f.Type != "text":
 			errs = append(errs, fmt.Errorf("field %q: required applies to string and text fields only", f.Name))
-		case seen[f.Name]:
-			errs = append(errs, fmt.Errorf("field %q listed twice", f.Name))
+		case f.Type == "ref" && strings.HasSuffix(f.Name, "_id"):
+			errs = append(errs, fmt.Errorf("field %q: name the relation without _id, e.g. %s:ref; the column becomes %s",
+				f.Name, strings.TrimSuffix(f.Name, "_id"), f.Name))
+		case f.Type == "ref" && !entityRe.MatchString(f.Ref):
+			errs = append(errs, fmt.Errorf("field %q: %q is not an entity name, e.g. customer:ref:Customer", f.Name, f.Ref))
+		case f.Type == "ref" && entityRe.MatchString(name) && pascal(f.Ref) == pascal(name):
+			errs = append(errs, fmt.Errorf("field %q: an entity cannot refer to itself yet", f.Name))
+		case seen[col]:
+			errs = append(errs, fmt.Errorf("field %q listed twice", col))
 		}
-		seen[f.Name] = true
+		seen[col] = true
 		s.Fields = append(s.Fields, f)
 	}
 	return s, errors.Join(errs...)

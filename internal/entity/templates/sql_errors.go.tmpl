@@ -1,0 +1,28 @@
+package {{.P.db.Name}}
+
+import (
+	"errors"
+
+{{- if eq .Opt.Database "postgresql"}}
+
+	"{{.DB.Module}}/pgconn"
+{{- else}}
+
+	"{{.DB.Module}}"
+{{- end}}
+)
+
+// Shared by every entity repository. Generated once by projgen add entity.
+
+// isForeignKeyViolation reports whether err is the database refusing a write
+// because of a foreign key: deleting a row others refer to, or referring to
+// a row that does not exist.
+func isForeignKeyViolation(err error) bool {
+{{- if eq .Opt.Database "postgresql"}}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+{{- else}}
+	var myErr *mysql.MySQLError
+	return errors.As(err, &myErr) && (myErr.Number == 1451 || myErr.Number == 1452)
+{{- end}}
+}

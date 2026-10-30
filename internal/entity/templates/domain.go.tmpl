@@ -34,6 +34,11 @@ func (in {{.E.Name}}Input) Validate() error {
 		errs = append(errs, errors.New("{{.JSON}} is required"))
 	}
 {{- end}}
+{{- if eq .Type "ref"}}
+	if in.{{.Go}} <= 0 {
+		errs = append(errs, errors.New("{{.JSON}} is required"))
+	}
+{{- end}}
 {{- if eq .Type "string"}}
 	if utf8.RuneCountInString(in.{{.Go}}) > 255 {
 		errs = append(errs, errors.New("{{.JSON}} must be at most 255 characters"))
@@ -42,12 +47,21 @@ func (in {{.E.Name}}Input) Validate() error {
 {{- end}}
 	return errors.Join(errs...)
 }
+{{- if .Refs}}
+
+// {{.E.Name}}Filter narrows a list. A zero field matches every record.
+type {{.E.Name}}Filter struct {
+{{- range .Refs}}
+	{{.Go}} int64
+{{- end}}
+}
+{{- end}}
 
 // {{.E.Name}}Repository stores {{.E.Name}} records.
 type {{.E.Name}}Repository interface {
 	Create(ctx context.Context, in {{.E.Name}}Input) ({{.E.Name}}, error)
 	Get(ctx context.Context, id int64) ({{.E.Name}}, error)
-	List(ctx context.Context, limit, offset int) ([]{{.E.Name}}, error)
+	List(ctx context.Context, {{if .Refs}}f {{.E.Name}}Filter, {{end}}limit, offset int) ([]{{.E.Name}}, error)
 	Update(ctx context.Context, id int64, in {{.E.Name}}Input) ({{.E.Name}}, error)
 	Delete(ctx context.Context, id int64) error
 }
