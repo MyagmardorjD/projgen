@@ -187,3 +187,22 @@ func TestExpandHome(t *testing.T) {
 		}
 	}
 }
+
+func TestExpandHomeByOS(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "me")
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		if got, want := expandHome("~/source/repos", home, goos), filepath.Join(home, "source", "repos"); got != want {
+			t.Errorf("%s: expandHome(~/source/repos) = %q, want %q", goos, got, want)
+		}
+		if got := expandHome("~", home, goos); got != home {
+			t.Errorf("%s: expandHome(~) = %q, want %q", goos, got, home)
+		}
+		if got := expandHome("~user/x", home, goos); got != "~user/x" {
+			t.Errorf("%s: expandHome(~user/x) = %q, want it unchanged", goos, got)
+		}
+		got := expandHome(`~\source`, home, goos)
+		if expanded := strings.HasPrefix(got, home); expanded != (goos == "windows") {
+			t.Errorf("%s: expandHome(~\\source) = %q; only Windows treats ~\\ as home", goos, got)
+		}
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -132,6 +133,7 @@ func TestOptions(t *testing.T) {
 	got := decodeBody[struct {
 		Frameworks    map[string][]struct{ Value string }
 		DefaultParent string `json:"default_parent"`
+		FileManager   string `json:"file_manager"`
 		Versions      struct {
 			Rows []struct{ Name, Version string }
 		}
@@ -141,6 +143,9 @@ func TestOptions(t *testing.T) {
 	}
 	if !strings.HasSuffix(filepath.ToSlash(got.DefaultParent), "source/repos") {
 		t.Errorf("default parent = %s", got.DefaultParent)
+	}
+	if got.FileManager != fileManager(runtime.GOOS) {
+		t.Errorf("file manager = %q, want %q", got.FileManager, fileManager(runtime.GOOS))
 	}
 	if len(got.Versions.Rows) == 0 || got.Versions.Rows[0].Version == "" {
 		t.Errorf("versions missing: %+v", got.Versions)
@@ -202,6 +207,34 @@ func TestZip(t *testing.T) {
 		if !names[want] {
 			t.Errorf("zip missing %s", want)
 		}
+	}
+}
+
+func TestZipKeepsMavenWrapperExecutable(t *testing.T) {
+	e := newEnv(t)
+	req := validReq("")
+	req["options"] = map[string]any{
+		"name": "orders", "module": "com.techpartners.orders", "language": "java",
+		"framework": "spring-boot", "architecture": "layered", "database": "none",
+	}
+	resp := e.post("/api/zip", req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modes := map[string]os.FileMode{}
+	for _, f := range zr.File {
+		modes[f.Name] = f.Mode()
+	}
+	if m, ok := modes["orders/mvnw"]; !ok || m&0o111 == 0 {
+		t.Errorf("orders/mvnw mode = %v, want executable", m)
+	}
+	if m := modes["orders/pom.xml"]; m&0o111 != 0 {
+		t.Errorf("orders/pom.xml mode = %v, want not executable", m)
 	}
 }
 

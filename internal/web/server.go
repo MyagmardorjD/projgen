@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -172,6 +173,7 @@ func (s *Server) options(w http.ResponseWriter, _ *http.Request) {
 		"extras":         options.Extras,
 		"default_parent": create.DefaultParent(),
 		"separator":      string(filepath.Separator),
+		"file_manager":   fileManager(runtime.GOOS),
 		"versions":       rows(s.current()),
 		"presets":        presets,
 		"field_types":    strings.Split(entity.TypeNames, ", "),
@@ -274,7 +276,12 @@ func (s *Server) zip(w http.ResponseWriter, r *http.Request) {
 	}
 	slices.Sort(names)
 	for _, n := range names {
-		f, err := zw.CreateHeader(&zip.FileHeader{Name: req.Options.Name + "/" + n, Method: zip.Deflate, Modified: time.Now()})
+		h := &zip.FileHeader{Name: req.Options.Name + "/" + n, Method: zip.Deflate, Modified: time.Now()}
+		h.SetMode(0o644)
+		if path.Base(n) == "mvnw" {
+			h.SetMode(0o755) // keep the Maven Wrapper executable when unzipped on macOS and Linux
+		}
+		f, err := zw.CreateHeader(h)
 		if err == nil {
 			_, err = f.Write(files[n])
 		}
@@ -321,13 +328,13 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	for _, wn := range warns {
 		warnings = append(warnings, fmt.Sprintf("%s failed: %v", wn.Step, wn.Err))
 	}
-	_, hasCode := exec.LookPath("code")
+	_, hasCode := codeCommand(runtime.GOOS, dir, exec.LookPath, appInstalled)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dir":      dir,
 		"files":    res.Files,
 		"warnings": warnings,
 		"log":      log.String(),
-		"has_code": hasCode == nil,
+		"has_code": hasCode,
 	})
 }
 
@@ -453,36 +460,6 @@ func (s *Server) open(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func openDir(dir, with string) error {
-	if with == "code" {
-		code, err := exec.LookPath("code")
-		if err != nil {
-			return errors.New("VS Code (code) is not on PATH")
-		}
-		return exec.Command(code, dir).Start()
-	}
-	switch runtime.GOOS {
-	case "windows":
-		return exec.Command("explorer", dir).Start()
-	case "darwin":
-		return exec.Command("open", dir).Start()
-	default:
-		return exec.Command("xdg-open", dir).Start()
-	}
-}
-
-// OpenBrowser opens url in the default browser.
-func OpenBrowser(url string) error {
-	switch runtime.GOOS {
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		return exec.Command("open", url).Start()
-	default:
-		return exec.Command("xdg-open", url).Start()
-	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

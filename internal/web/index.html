@@ -482,6 +482,8 @@ async function init() {
   choices($('database'), 'database', meta.databases, 'radio');
   choices($('extras'), 'extras', meta.extras, 'checkbox');
   $('parent').value = meta.default_parent;
+  const openWith = { Finder: 'Finder-ээр нээх', Explorer: 'Explorer-оор нээх' }[meta.file_manager];
+  if (openWith) $('openFolder').textContent = openWith;
   syncModule();
   renderVersions(meta.versions);
   renderPresets('');
